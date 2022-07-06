@@ -41,14 +41,14 @@ void LearnVKApp::createVKInstance() {
 	VkInstanceCreateInfo createInfo = {};
 	createInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
 	createInfo.pApplicationInfo = &appInfo;
-	// 填写glfw窗口系统扩展的信息
+	// 填写glfw窗口系统扩展和debug messager扩展的信息
 	auto extentionsName = getRequiredExtentions();
 
 	createInfo.enabledExtensionCount =  static_cast<uint32_t>(extentionsName.size());
 	createInfo.ppEnabledExtensionNames = extentionsName.data();
 	// 填写校验层信息
 	if (enableValidationLayers) {
-		createInfo.enabledExtensionCount = static_cast<uint32_t>(m_validationLayers.size());
+		createInfo.enabledLayerCount = static_cast<uint32_t>(m_validationLayers.size());
 		createInfo.ppEnabledLayerNames = m_validationLayers.data();
 	} else {
 		createInfo.enabledLayerCount = 0;
@@ -58,7 +58,7 @@ void LearnVKApp::createVKInstance() {
 
 	// 在实例创建之前检查实例支持的扩展列表
 	if (!checkExtentionsProperties(extentionsName)) {
-		throw std::runtime_error("failed to support glfw instance extention");
+		throw std::runtime_error("failed to support instance extention");
 	}
 
 	VkResult res = vkCreateInstance(&createInfo, nullptr, &m_vkInstance);
@@ -115,10 +115,11 @@ bool LearnVKApp::checkExtentionsProperties(std::vector<const char*>& extentionsN
 	vkEnumerateInstanceExtensionProperties(nullptr, &extentionCount, nullptr);
 	std::vector<VkExtensionProperties> extentionsProperties(extentionCount);
 	vkEnumerateInstanceExtensionProperties(nullptr, &extentionCount, extentionsProperties.data());
-	std::cout << "\t" << extentionsProperties.size() << std::endl;
+	// 打印可用的扩展信息
+	/*std::cout << "\t" << extentionsProperties.size() << std::endl;
 	for (auto& properties : extentionsProperties) {
 		std::cout << "\t" << properties.extensionName << std::endl;
-	}
+	}*/
 	for (const char* name : extentionsName) {
 		if (std::find_if(extentionsProperties.begin(), extentionsProperties.end(), 
 			[name](VkExtensionProperties val) {
@@ -153,6 +154,9 @@ void LearnVKApp::loop() {	// 应用的主循环
 }
 
 void LearnVKApp::clear() {	// 释放Vulkan的资源
+	if (enableValidationLayers) {
+		destroyDebugUtilsMessengerEXT(m_vkInstance, &m_callBack, nullptr);
+	}
 	vkDestroyInstance(m_vkInstance, nullptr);
 	glfwDestroyWindow(m_window);
 	glfwTerminate();
@@ -170,6 +174,17 @@ VkResult createDebugUtilsMessengerEXT(VkInstance instance,
 		return func(instance, pCreateInfo, pAllocator, pCallback);
 	} else {
 		return VK_ERROR_EXTENSION_NOT_PRESENT;
+	}
+}
+
+void destroyDebugUtilsMessengerEXT(VkInstance instance,
+	VkDebugUtilsMessengerEXT* pCallback,
+	const VkAllocationCallbacks* pAllocator
+) {
+	auto func = (PFN_vkDestroyDebugUtilsMessengerEXT)
+		vkGetInstanceProcAddr(instance, "vkDestroyDebugUtilsMessengerEXT");
+	if (func != nullptr) {
+		func(instance, *pCallback, pAllocator);
 	}
 }
 

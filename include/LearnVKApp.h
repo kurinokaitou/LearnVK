@@ -18,10 +18,6 @@
 
 class LearnVKApp
 {
-friend VkResult createDebugUtilsMessengerEXT(VkInstance instance,
-	const VkDebugUtilsMessengerCreateInfoEXT* pCreateInfo,
-	const VkAllocationCallbacks* pAllocator,
-	VkDebugUtilsMessengerEXT* pCallback);
 public:
 	void run();
 
@@ -74,4 +70,9 @@ VkResult createDebugUtilsMessengerEXT(VkInstance instance,
 	const VkDebugUtilsMessengerCreateInfoEXT* pCreateInfo,
 	const VkAllocationCallbacks* pAllocator,
 	VkDebugUtilsMessengerEXT* pCallback);
+
+void destroyDebugUtilsMessengerEXT(VkInstance instance,
+	VkDebugUtilsMessengerEXT* pCallback,
+	const VkAllocationCallbacks* pAllocator
+);
 #endif
