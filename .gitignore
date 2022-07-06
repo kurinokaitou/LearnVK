@@ -30,3 +30,9 @@
 *.exe
 *.out
 *.app
+
+# directories
+
+/out
+/.vs
+
