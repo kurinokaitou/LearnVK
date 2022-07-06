@@ -1,7 +1,7 @@
 ﻿cmake_minimum_required (VERSION 3.8)
 # 设置cmake工具链为vcpkg
 if(NOT DEFINED ENV{VCPKG_ROOT_PATH})
-	message(FATAL_ERROR "VCPKG_PATH not defined!")
+	message(FATAL_ERROR "VCPKG_ROOT_PATH not defined!")
 endif()
 set(VCPKG_PATH $ENV{VCPKG_ROOT_PATH})
 set(VCPKG_ROOT ${VCPKG_PATH}/scripts/buildsystems/vcpkg.cmake CACHE PATH "")

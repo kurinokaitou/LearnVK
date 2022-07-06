@@ -20,6 +20,9 @@ void LearnVKApp::initWindows() {	// 初始化glfw
 void LearnVKApp::initVK() {	// 初始化Vulkan的设备
 	createVKInstance();
 	setupDebugCallback();
+	createSurface();
+	pickPhysicalDevice();
+	createLogicalDevice();
 }
 
 void LearnVKApp::createVKInstance() {
@@ -56,8 +59,8 @@ void LearnVKApp::createVKInstance() {
 	}
 	
 
-	// 在实例创建之前检查实例支持的扩展列表
-	if (!checkExtentionsProperties(extentionsName)) {
+	// 在实例创建之前检查实例支持的扩展列表, 只检查glfw的扩展，因为校验层扩展已经通过检查
+	if (!checkInstanceExtentionsSupport(extentionsName)) {
 		throw std::runtime_error("failed to support instance extention");
 	}
 
@@ -86,6 +89,13 @@ void LearnVKApp::setupDebugCallback() {
 	}
 }
 
+void LearnVKApp::createSurface() {
+	VkResult res = glfwCreateWindowSurface(m_vkInstance, m_window, nullptr, &m_surface);
+	if (res != VK_SUCCESS) {
+		throw std::runtime_error("failed to create window surface!");
+	}
+}
+
 // DebugUtilsMessage 被Vulkan调用的静态用户定义行为函数，在一般情况只返回VK_FALSE
 VKAPI_ATTR VkBool32 VKAPI_CALL LearnVKApp::debugCallback(
 	VkDebugUtilsMessageSeverityFlagBitsEXT messagesSeverity,
@@ -109,13 +119,13 @@ std::vector<const char*> LearnVKApp::getRequiredExtentions() {
 	return extentionList;
 }
 
-// 只检查glfw的扩展，因为校验层扩展已经通过检查
-bool LearnVKApp::checkExtentionsProperties(std::vector<const char*>& extentionsName) {
+bool LearnVKApp::checkInstanceExtentionsSupport(std::vector<const char*>& extentionsName) {
 	uint32_t extentionCount = 0;
 	vkEnumerateInstanceExtensionProperties(nullptr, &extentionCount, nullptr);
+	assert(extentionCount != 0);
 	std::vector<VkExtensionProperties> extentionsProperties(extentionCount);
 	vkEnumerateInstanceExtensionProperties(nullptr, &extentionCount, extentionsProperties.data());
-	// 打印可用的扩展信息
+	//打印可用的扩展信息
 	/*std::cout << "\t" << extentionsProperties.size() << std::endl;
 	for (auto& properties : extentionsProperties) {
 		std::cout << "\t" << properties.extensionName << std::endl;
@@ -131,9 +141,32 @@ bool LearnVKApp::checkExtentionsProperties(std::vector<const char*>& extentionsN
 	return true;
 }
 
+bool LearnVKApp::checkDeviceExtentionsSupport(VkPhysicalDevice physicalDevice) {
+	uint32_t extentionCount = 0;
+	vkEnumerateDeviceExtensionProperties(physicalDevice ,nullptr, &extentionCount, nullptr);
+	assert(extentionCount != 0);
+	std::vector<VkExtensionProperties> extentionsProperties(extentionCount);
+	vkEnumerateDeviceExtensionProperties(physicalDevice ,nullptr, &extentionCount, extentionsProperties.data());
+	//打印可用的扩展信息
+	/*std::cout << "\t" << extentionsProperties.size() << std::endl;
+	for (auto& properties : extentionsProperties) {
+		std::cout << "\t" << properties.extensionName << std::endl;
+	}*/
+	for (const char* name : m_deviceExtentions) {
+		if (std::find_if(extentionsProperties.begin(), extentionsProperties.end(),
+			[name](VkExtensionProperties val) {
+				return std::strcmp(val.extensionName, name) == 0;
+			}) == extentionsProperties.end()) {
+			return false;
+		}
+	}
+	return true;
+}
+
 bool LearnVKApp::checkValidationLayersProperties() {
 	uint32_t validationLayersCount = 0;
 	vkEnumerateInstanceLayerProperties(&validationLayersCount, nullptr);
+	assert(validationLayersCount != 0);
 	std::vector<VkLayerProperties> availableLayers(validationLayersCount);
 	vkEnumerateInstanceLayerProperties(&validationLayersCount, availableLayers.data());
 	// 检查所有m_validationLayers中要求的layer层是否都支持
@@ -147,6 +180,117 @@ bool LearnVKApp::checkValidationLayersProperties() {
 	return true;
 }
 
+void LearnVKApp::pickPhysicalDevice() {
+	uint32_t deviceCount = 0;
+	vkEnumeratePhysicalDevices(m_vkInstance, &deviceCount, nullptr);
+	if (deviceCount == 0) {
+		throw std::runtime_error("failed to pick a GPU with Vulkan support!");
+	}
+	std::vector<VkPhysicalDevice> physicalDevices(deviceCount);
+	vkEnumeratePhysicalDevices(m_vkInstance, &deviceCount, physicalDevices.data());
+	for (auto& device : physicalDevices) {
+		if (isDeviceSuitable(device)) {
+			m_physicalDevice = device;
+			break;
+		}
+	}
+	if (m_physicalDevice == VK_NULL_HANDLE) {
+		throw std::runtime_error("failed to pick a suitable GPU!");
+	}
+}
+
+// 通过获取properties 和 features然后判断是否满足需求
+bool LearnVKApp::isDeviceSuitable(VkPhysicalDevice physicalDevice) {
+	// TODO: judge device is suitable
+	VkPhysicalDeviceProperties properties = {};
+	VkPhysicalDeviceFeatures features = {};
+	vkGetPhysicalDeviceProperties(physicalDevice, &properties);
+	vkGetPhysicalDeviceFeatures(physicalDevice, &features);
+
+	// 根据设备获取队列族，如果存在满足VK_QUEUE_GRAPHICS_BIT的队列族即可
+	QueueFamiliyIndices indices = findDeviceQueueFamilies(physicalDevice);
+	// 查询设备是否支持要求的扩展
+	bool extentionsSupport = checkDeviceExtentionsSupport(physicalDevice);
+	return indices.isComplete() && extentionsSupport;
+}
+
+void LearnVKApp::createLogicalDevice() {
+	QueueFamiliyIndices indices = findDeviceQueueFamilies(m_physicalDevice);
+	std::vector<VkDeviceQueueCreateInfo> queueCreateInfos;
+	float queuePriority = 1.0f;
+	for (auto index : indices.familiesIndexSet) {
+		VkDeviceQueueCreateInfo queueCreateInfo = {};
+		queueCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+		queueCreateInfo.queueCount = 1;
+		queueCreateInfo.queueFamilyIndex = index;
+		queueCreateInfo.pQueuePriorities = &queuePriority;
+		queueCreateInfos.push_back(queueCreateInfo);
+	}
+	
+	// TODO: 填写物理设备features
+	VkPhysicalDeviceFeatures features = {};
+
+	VkDeviceCreateInfo deviceCreateInfo = {};
+	deviceCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+	deviceCreateInfo.pQueueCreateInfos = queueCreateInfos.data();
+	// 只创建一个队列
+	deviceCreateInfo.queueCreateInfoCount = static_cast<uint32_t>(queueCreateInfos.size());
+	deviceCreateInfo.pEnabledFeatures = &features;
+	deviceCreateInfo.enabledExtensionCount = static_cast<uint32_t>(m_deviceExtentions.size());
+	deviceCreateInfo.ppEnabledExtensionNames = m_deviceExtentions.data();
+	// 校验层
+	if (enableValidationLayers) {
+		deviceCreateInfo.enabledLayerCount = static_cast<uint32_t>(m_validationLayers.size());
+		deviceCreateInfo.ppEnabledLayerNames = m_validationLayers.data();
+	} else {
+		deviceCreateInfo.enabledLayerCount = 0;
+	}
+	// 创建逻辑设备
+	VkResult res = vkCreateDevice(m_physicalDevice, &deviceCreateInfo, nullptr, &m_device);
+	if (res != VK_SUCCESS) {
+		throw std::runtime_error("failed to create logical device");
+	}
+	// 命令队列在创建逻辑设备时被一起创建，因为我们只创建了一个队列，所以直接获取索引0的队列即可
+	VkQueue queue;
+	vkGetDeviceQueue(m_device, static_cast<uint32_t>(indices.graphicsFamily), 0, &queue);	// 获取到队列句柄,并添加到map中去
+	m_queueMap.insert(std::make_pair("graphicsFamily", queue));
+	vkGetDeviceQueue(m_device, static_cast<uint32_t>(indices.presentFamily), 0, &queue);
+	m_queueMap.insert(std::make_pair("presentFamily", queue));
+}
+
+QueueFamiliyIndices LearnVKApp::findDeviceQueueFamilies(VkPhysicalDevice physicalDevice) {
+	QueueFamiliyIndices indices;
+	uint32_t deviceQueueFamilyCount = 0;
+	VkBool32 presentSupport = false;
+
+	vkGetPhysicalDeviceQueueFamilyProperties(physicalDevice, &deviceQueueFamilyCount, nullptr);
+	assert(deviceQueueFamilyCount != 0);
+	std::vector<VkQueueFamilyProperties> properties(deviceQueueFamilyCount);
+	vkGetPhysicalDeviceQueueFamilyProperties(physicalDevice, &deviceQueueFamilyCount, properties.data());
+
+	for (int i = 0; i < deviceQueueFamilyCount; i++) {
+		VkQueueFamilyProperties queueFamily = properties[i];
+		vkGetPhysicalDeviceSurfaceSupportKHR(physicalDevice, i, m_surface, &presentSupport);
+		if (queueFamily.queueCount > 0) {
+			if ((queueFamily.queueFlags & VK_QUEUE_GRAPHICS_BIT) && presentSupport) {
+				indices.graphicsFamily = i;
+				indices.presentFamily = i;
+				break;
+			}
+			if (queueFamily.queueFlags & VK_QUEUE_GRAPHICS_BIT) {
+				indices.graphicsFamily = i;
+			}
+			if (presentSupport) {
+				indices.presentFamily = i;
+			}
+		}
+	}
+	indices.familiesIndexSet.insert(indices.graphicsFamily);
+	indices.familiesIndexSet.insert(indices.presentFamily);
+	return indices;
+}
+
+
 void LearnVKApp::loop() {	// 应用的主循环
 	while (!glfwWindowShouldClose(m_window)) {
 		glfwPollEvents();
@@ -157,12 +301,12 @@ void LearnVKApp::clear() {	// 释放Vulkan的资源
 	if (enableValidationLayers) {
 		destroyDebugUtilsMessengerEXT(m_vkInstance, &m_callBack, nullptr);
 	}
+	vkDestroySurfaceKHR(m_vkInstance, m_surface, nullptr);
+	vkDestroyDevice(m_device, nullptr);
 	vkDestroyInstance(m_vkInstance, nullptr);
 	glfwDestroyWindow(m_window);
 	glfwTerminate();
 }
-
-
 
 VkResult createDebugUtilsMessengerEXT(VkInstance instance,
 	const VkDebugUtilsMessengerCreateInfoEXT* pCreateInfo,
@@ -187,8 +331,6 @@ void destroyDebugUtilsMessengerEXT(VkInstance instance,
 		func(instance, *pCallback, pAllocator);
 	}
 }
-
-
 
 int main()
 {
