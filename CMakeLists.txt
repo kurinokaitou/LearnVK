@@ -38,3 +38,28 @@ target_link_libraries(LearnVK PRIVATE ${VK_SDK_LIB})
 # 添加包含目录
 target_include_directories(LearnVK PRIVATE ${PROJECT_SOURCE_DIR}/include)
 target_include_directories(LearnVK PRIVATE ${VK_SDK_INCLUDE})
+
+# 编译着色器
+set(SHADER_DIR ${CMAKE_CURRENT_SOURCE_DIR}/src/shaders)
+file(GLOB SHADER_FILES CONFIGURE_DEPENDS "${SHADER_DIR}/*.vert"
+                                                 "${SHADER_DIR}/*.frag"
+                                                 "${SHADER_DIR}/*.comp"
+                                                 "${SHADER_DIR}/*.geom"
+                                                 "${SHADER_DIR}/*.tesc"
+                                                 "${SHADER_DIR}/*.tese"
+                                                 "${SHADER_DIR}/*.mesh"
+                                                 "${SHADER_DIR}/*.task"
+                                                 "${SHADER_DIR}/*.rgen"
+                                                 "${SHADER_DIR}/*.rchit"
+                                                 "${SHADER_DIR}/*.rmiss"
+                                                 "${SHADER_DIR}/*.rcall")
+
+include(${CMAKE_SOURCE_DIR}/cmake/compileShaders.cmake)
+
+source_group("shaders" FILES ${SHADER_FILES})
+set(SHADER_INCLUDE_DIR ${SHADER_DIR}/include)
+compile_shader("LearnVKPrecompile" "${SHADER_FILES}" "${SHADER_INCLUDE_DIR}")
+
+add_dependencies(LearnVK LearnVKPrecompile)
+
+target_include_directories(LearnVK PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/generated/cpp)
