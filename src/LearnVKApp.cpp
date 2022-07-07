@@ -14,7 +14,6 @@ void LearnVKApp::initWindows() {	// 初始化glfw
 	glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
 	glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
 	m_window = glfwCreateWindow(WINDOW_WIDTH, WINDOW_HEIGHT, "LearnVK", nullptr, nullptr);
-	
 }
 
 void LearnVKApp::initVK() {	// 初始化Vulkan的设备
@@ -23,6 +22,7 @@ void LearnVKApp::initVK() {	// 初始化Vulkan的设备
 	createSurface();
 	pickPhysicalDevice();
 	createLogicalDevice();
+	createSwapChain();
 }
 
 void LearnVKApp::createVKInstance() {
@@ -163,6 +163,74 @@ bool LearnVKApp::checkDeviceExtentionsSupport(VkPhysicalDevice physicalDevice) {
 	return true;
 }
 
+SwapChainSupportDetails LearnVKApp::queryDeviceSwapChainSupport(VkPhysicalDevice physicalDevice) {
+	SwapChainSupportDetails details;
+	vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physicalDevice, m_surface, &details.surfaceCapabilities);
+	// 获取物理设备表面支持的格式
+	uint32_t formatCount = 0;
+	vkGetPhysicalDeviceSurfaceFormatsKHR(physicalDevice, m_surface, &formatCount, nullptr);
+	if (formatCount != 0) {
+		details.formats.resize(formatCount);
+		vkGetPhysicalDeviceSurfaceFormatsKHR(physicalDevice, m_surface, &formatCount, details.formats.data());
+	}
+	uint32_t presentModeCount = 0;
+	vkGetPhysicalDeviceSurfacePresentModesKHR(physicalDevice, m_surface, &presentModeCount, nullptr);
+	if (presentModeCount != 0) {
+		details.presentModes.resize(presentModeCount);
+		vkGetPhysicalDeviceSurfacePresentModesKHR(physicalDevice, m_surface, &presentModeCount, details.presentModes.data());
+	}
+	return details;
+}
+
+void LearnVKApp::createSwapChain() {
+	SwapChainSupportDetails details = queryDeviceSwapChainSupport(m_physicalDevice);
+	VkSurfaceFormatKHR surfaceFormat = chooseBestfitSurfaceFormat(details.formats);
+	VkPresentModeKHR presentMode = chooseBestfitPresentMode(details.presentModes);
+	VkExtent2D extent = chooseSwapExtent(details.surfaceCapabilities);
+	uint32_t imageCount = details.surfaceCapabilities.minImageCount + 1;
+	uint32_t maxImageCount = details.surfaceCapabilities.maxImageCount;
+	if (maxImageCount > 0 && imageCount > maxImageCount) {
+		imageCount = maxImageCount;
+	} 
+	VkSwapchainCreateInfoKHR createInfo = {};
+	createInfo.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
+	createInfo.surface = m_surface;
+	createInfo.minImageCount = imageCount;
+	createInfo.imageArrayLayers = 1;
+	// 只是绘制选择颜色附着，如果需要后处理则需要选择TRANSFER_DST
+	createInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+	createInfo.imageExtent = extent;
+	createInfo.imageFormat = surfaceFormat.format;
+	createInfo.imageColorSpace = surfaceFormat.colorSpace;
+
+	QueueFamiliyIndices queueFamilyIndices = findDeviceQueueFamilies(m_physicalDevice);
+	auto familyIndicesSet = queueFamilyIndices.familiesIndexSet;
+	if (familyIndicesSet.size() != 1) {	// 存在多个队列族就会出现并发申请图片资源的问题
+		createInfo.imageSharingMode = VK_SHARING_MODE_CONCURRENT;
+		createInfo.queueFamilyIndexCount = static_cast<uint32_t>(familyIndicesSet.size());
+		createInfo.pQueueFamilyIndices = std::vector<uint32_t>(familyIndicesSet.begin(), familyIndicesSet.end()).data();
+	} else {
+		createInfo.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
+		createInfo.queueFamilyIndexCount = 0;		// 如果只有一个就不存在并发问题，这里随意填写即可
+		createInfo.pQueueFamilyIndices = nullptr;
+	}
+	createInfo.preTransform = details.surfaceCapabilities.currentTransform;	// 预设的缩放旋转等
+	createInfo.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;	// 窗口透明混合策略
+	createInfo.presentMode = presentMode;
+	createInfo.clipped = VK_TRUE;	// 允许被遮挡像素剔除
+	createInfo.oldSwapchain = VK_NULL_HANDLE;	// 重建交换链时用于指定之前的交换链
+
+	VkResult res = vkCreateSwapchainKHR(m_device, &createInfo, nullptr, &m_swapChain);
+	if (res != VK_SUCCESS) {
+		throw std::runtime_error("failed to create swap chain!");
+	}
+	uint32_t imageCount = 0;
+	// 获取交换链图像的句柄
+	vkGetSwapchainImagesKHR(m_device, m_swapChain, &imageCount, nullptr);
+	m_swapChainImages.resize(imageCount);
+	vkGetSwapchainImagesKHR(m_device, m_swapChain, &imageCount, m_swapChainImages.data());
+}
+
 bool LearnVKApp::checkValidationLayersProperties() {
 	uint32_t validationLayersCount = 0;
 	vkEnumerateInstanceLayerProperties(&validationLayersCount, nullptr);
@@ -211,7 +279,12 @@ bool LearnVKApp::isDeviceSuitable(VkPhysicalDevice physicalDevice) {
 	QueueFamiliyIndices indices = findDeviceQueueFamilies(physicalDevice);
 	// 查询设备是否支持要求的扩展
 	bool extentionsSupport = checkDeviceExtentionsSupport(physicalDevice);
-	return indices.isComplete() && extentionsSupport;
+	bool swapChainAdequate = false;
+	if (extentionsSupport) {
+		auto swapChainDetails = queryDeviceSwapChainSupport(physicalDevice);
+		swapChainAdequate = !swapChainDetails.formats.empty() && !swapChainDetails.presentModes.empty();
+	}
+	return indices.isComplete() && extentionsSupport && swapChainAdequate;
 }
 
 void LearnVKApp::createLogicalDevice() {
@@ -301,11 +374,55 @@ void LearnVKApp::clear() {	// 释放Vulkan的资源
 	if (enableValidationLayers) {
 		destroyDebugUtilsMessengerEXT(m_vkInstance, &m_callBack, nullptr);
 	}
+	vkDestroySwapchainKHR(m_device, m_swapChain, nullptr);
 	vkDestroySurfaceKHR(m_vkInstance, m_surface, nullptr);
 	vkDestroyDevice(m_device, nullptr);
 	vkDestroyInstance(m_vkInstance, nullptr);
 	glfwDestroyWindow(m_window);
 	glfwTerminate();
+}
+
+VkExtent2D LearnVKApp::chooseSwapExtent(const VkSurfaceCapabilitiesKHR& capabilities) {
+	if (capabilities.currentExtent.width != std::numeric_limits<uint32_t>::max()) {
+		return capabilities.currentExtent;
+	} else {
+		VkExtent2D actualExtent = {WINDOW_WIDTH, WINDOW_HEIGHT};
+		actualExtent.width = std::max(capabilities.minImageExtent.width,
+			std::min(capabilities.maxImageExtent.width, actualExtent.width));
+		actualExtent.height = std::max(capabilities.minImageExtent.height,
+			std::min(capabilities.maxImageExtent.height, actualExtent.height));
+		return actualExtent;
+	}
+}
+
+// 选择一个最好的格式，如果有SRGB就选SRGB
+VkSurfaceFormatKHR chooseBestfitSurfaceFormat(std::vector<VkSurfaceFormatKHR>& formats) {
+	if (formats.size() == 1 && formats[0].format == VK_FORMAT_UNDEFINED) {
+		return {
+			VK_FORMAT_B8G8R8A8_SNORM,
+			VK_COLOR_SPACE_SRGB_NONLINEAR_KHR
+		};
+	} else {
+		for (auto& format : formats) {
+			if (format.format == VK_FORMAT_B8G8R8A8_SNORM && format.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
+				return format;
+			}
+		}
+	}
+	return formats[0];
+}
+
+// 选择一个最好的显示模式，有三缓冲会直接选择三缓冲
+VkPresentModeKHR chooseBestfitPresentMode(std::vector<VkPresentModeKHR>& presentModes) {
+	VkPresentModeKHR bestMode = VK_PRESENT_MODE_IMMEDIATE_KHR;
+	for (auto& presentMode : presentModes) {
+		if (presentMode == VK_PRESENT_MODE_MAILBOX_KHR) {
+			return presentMode;
+		} else if(presentMode == VK_PRESENT_MODE_FIFO_KHR) {
+			bestMode = VK_PRESENT_MODE_FIFO_KHR;
+		}
+	}
+	return bestMode;
 }
 
 VkResult createDebugUtilsMessengerEXT(VkInstance instance,

@@ -20,7 +20,7 @@
 
 struct QueueFamiliyIndices
 {
-	std::set<int> familiesIndexSet;
+	std::set<uint32_t> familiesIndexSet;
 	int graphicsFamily = -1;
 	int presentFamily = -1;
 	bool isComplete() {
@@ -30,8 +30,15 @@ struct QueueFamiliyIndices
 		return graphicsFamily == presentFamily;
 	}
 	int familyCount() {
-		return static_cast<int>(familiesIndexSet.size());
+		return static_cast<uint32_t>(familiesIndexSet.size());
 	}
+};
+
+struct SwapChainSupportDetails
+{
+	VkSurfaceCapabilitiesKHR surfaceCapabilities;
+	std::vector<VkSurfaceFormatKHR> formats;
+	std::vector<VkPresentModeKHR> presentModes;
 };
 
 class LearnVKApp
@@ -59,6 +66,10 @@ private:
 
 	bool checkDeviceExtentionsSupport(VkPhysicalDevice physicalDevice);
 
+	VkExtent2D chooseSwapExtent(const VkSurfaceCapabilitiesKHR& capabilities);
+
+	SwapChainSupportDetails queryDeviceSwapChainSupport(VkPhysicalDevice physicalDevice);
+
 	bool checkValidationLayersProperties();
 
 	QueueFamiliyIndices findDeviceQueueFamilies(VkPhysicalDevice physicalDevice);
@@ -70,6 +81,8 @@ private:
 	void pickPhysicalDevice();
 
 	void createLogicalDevice();
+
+	void createSwapChain();
 
 	void initWindows();
 
@@ -92,13 +105,19 @@ private:
 	// 一台逻辑设备
 	VkDevice m_device = VK_NULL_HANDLE;
 
+	// 交换链
+	VkSwapchainKHR m_swapChain = VK_NULL_HANDLE;
+
+	// 交换链中的图像句柄，我们操作其来渲染
+	std::vector<VkImage> m_swapChainImages;
+
 	std::map<std::string, VkQueue> m_queueMap;
 
 	std::vector<const char*> m_validationLayers{ "VK_LAYER_KHRONOS_validation" };
 	std::vector<const char*> m_deviceExtentions{ VK_KHR_SWAPCHAIN_EXTENSION_NAME };
 
-	const int WINDOW_WIDTH = 800;
-	const int WINDOW_HEIGHT = 600;
+	const uint32_t WINDOW_WIDTH = 800;
+	const uint32_t WINDOW_HEIGHT = 600;
 
 #ifdef NDEBUG
 	const bool enableValidationLayers = false;
@@ -106,6 +125,10 @@ private:
 	const bool enableValidationLayers = true;
 #endif	
 };
+
+VkSurfaceFormatKHR chooseBestfitSurfaceFormat(std::vector<VkSurfaceFormatKHR>& formats);
+
+VkPresentModeKHR chooseBestfitPresentMode(std::vector<VkPresentModeKHR>& presentModes);
 
 VkResult createDebugUtilsMessengerEXT(VkInstance instance,
 	const VkDebugUtilsMessengerCreateInfoEXT* pCreateInfo,
