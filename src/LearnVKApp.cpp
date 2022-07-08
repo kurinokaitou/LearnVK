@@ -26,6 +26,10 @@ void LearnVKApp::initVK() {	// 初始化Vulkan的设备
 	createImageViews();
 	createRenderPass();
 	createGraphicsPipeline();
+	createFrameBuffers();
+	createCommandPool();
+	createCommandBuffers();
+	createSyncObjects();
 }
 
 void LearnVKApp::createVKInstance() {
@@ -295,6 +299,15 @@ void LearnVKApp::createRenderPass() {
 	subpass.colorAttachmentCount = 1;
 	subpass.pColorAttachments = &colorAttachReference;	// 颜色帧缓冲附着会被在frag中使用作为输出
 
+	// * 子流程依赖
+	VkSubpassDependency dependency = {};
+	dependency.srcSubpass = VK_SUBPASS_EXTERNAL;//隐含的子流程
+	dependency.dstSubpass = 0; 
+	dependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT; // 需要等待交换链读取完图像
+	dependency.srcAccessMask = 0;
+	dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT; // 为等待颜色附着的输出阶段
+	dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+
 	// 渲染流程
 	VkRenderPassCreateInfo renderPassCreateInfo = {};
 	renderPassCreateInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
@@ -302,6 +315,8 @@ void LearnVKApp::createRenderPass() {
 	renderPassCreateInfo.pAttachments = &colorAttachment;
 	renderPassCreateInfo.subpassCount = 1;
 	renderPassCreateInfo.pSubpasses = &subpass;
+	renderPassCreateInfo.dependencyCount = 1;
+	renderPassCreateInfo.pDependencies = &dependency;
 	VkResult res = vkCreateRenderPass(m_device, &renderPassCreateInfo, nullptr, &m_renderPass);
 	if (res != VK_SUCCESS) {
 		throw std::runtime_error("failed to create render pass!");
@@ -467,6 +482,116 @@ void LearnVKApp::createGraphicsPipeline() {
 	vkDestroyShaderModule(m_device, fragmentShaderModule, nullptr);
 }
 
+void LearnVKApp::createFrameBuffers() {
+	m_swapChainFrameBuffers.resize(m_swapChainImageViews.size());
+	for (int i = 0; i < m_swapChainImages.size(); i++) {
+		VkImageView imageViews[] = { m_swapChainImageViews[i] };
+		VkFramebufferCreateInfo createInfo = {};
+		createInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+		createInfo.renderPass = m_renderPass;
+		createInfo.attachmentCount = 1;
+		createInfo.pAttachments = imageViews;
+		createInfo.width = m_swapChainImageExtent.width;
+		createInfo.height = m_swapChainImageExtent.height;
+		createInfo.layers = 1;
+		VkResult res = vkCreateFramebuffer(m_device, &createInfo, nullptr, &m_swapChainFrameBuffers[i]);
+		if (res != VK_SUCCESS) {
+			throw std::runtime_error("failed to create frame buffer");
+		}
+	}	
+}
+
+void LearnVKApp::createCommandPool() {
+	QueueFamiliyIndices indices = findDeviceQueueFamilies(m_physicalDevice);
+	VkCommandPoolCreateInfo createInfo = {};
+	createInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+	createInfo.queueFamilyIndex = indices.graphicsFamily;
+	createInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+	VkResult res = vkCreateCommandPool(m_device, &createInfo, nullptr, &m_commandPool);
+	if (res != VK_SUCCESS) {
+		throw std::runtime_error("failed to create command pool!");
+	}
+}
+
+void LearnVKApp::createCommandBuffers() {
+	m_commandBuffers.resize(MAX_FRAMES_IN_FLIGHT);
+	VkCommandBufferAllocateInfo allocInfo = {};
+	allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+	allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+	allocInfo.commandPool = m_commandPool;
+	allocInfo.commandBufferCount = static_cast<uint32_t>(m_commandBuffers.size());
+	VkResult res = vkAllocateCommandBuffers(m_device, &allocInfo, m_commandBuffers.data());
+	if (res != VK_SUCCESS) {
+		throw std::runtime_error("failed to allocate command buffer!");
+	}
+}
+
+void LearnVKApp::createSyncObjects() {
+	VkSemaphoreCreateInfo createInfo = {};
+	createInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+	m_imageAvailableSemaphore.resize(MAX_FRAMES_IN_FLIGHT);
+	m_renderFinishSemaphore.resize(MAX_FRAMES_IN_FLIGHT);
+
+	VkFenceCreateInfo fenceCreateInfo = {};
+	fenceCreateInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+	fenceCreateInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
+	m_fences.resize(MAX_FRAMES_IN_FLIGHT);
+
+	for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+		VkResult res1 = vkCreateSemaphore(m_device, &createInfo, nullptr, &m_imageAvailableSemaphore[i]);
+		VkResult res2 = vkCreateSemaphore(m_device, &createInfo, nullptr, &m_renderFinishSemaphore[i]);
+		VkResult res3 = vkCreateFence(m_device, &fenceCreateInfo, nullptr, &m_fences[i]);
+		if (res1 != VK_SUCCESS || res2 != VK_SUCCESS || res3 != VK_SUCCESS) {
+			throw std::runtime_error("failed to create semaphores!");
+		}
+	}
+}
+
+void LearnVKApp::recordCommandBuffers(VkCommandBuffer commandBuffer, uint32_t imageIndex) {
+	// 让command buffer 开始记录执行指令
+	VkCommandBufferBeginInfo beginInfo = {};
+	beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+	beginInfo.flags = VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT;
+	beginInfo.pInheritanceInfo = nullptr;
+	VkResult res = vkBeginCommandBuffer(commandBuffer, &beginInfo);
+	if (res != VK_SUCCESS) {
+		throw std::runtime_error("failed to begin command buffer!");
+	}
+	// 开始渲染流程
+	VkRenderPassBeginInfo renderPassBeginInfo = {};
+	renderPassBeginInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+	renderPassBeginInfo.renderPass = m_renderPass;
+	renderPassBeginInfo.framebuffer = m_swapChainFrameBuffers[imageIndex];
+	renderPassBeginInfo.renderArea.extent = m_swapChainImageExtent;
+	renderPassBeginInfo.renderArea.offset = { 0, 0 };
+	VkClearValue clearValue = {0,0,0,1.0f};
+	renderPassBeginInfo.clearValueCount = 1;
+	renderPassBeginInfo.pClearValues = &clearValue;
+	vkCmdBeginRenderPass(commandBuffer, &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
+	vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_graphicsPipeline);
+	
+	/*VkViewport viewport{};
+	viewport.x = 0.0f;
+	viewport.y = 0.0f;
+	viewport.width = (float)m_swapChainImageExtent.width;
+	viewport.height = (float)m_swapChainImageExtent.height;
+	viewport.minDepth = 0.0f;
+	viewport.maxDepth = 1.0f;
+	vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
+
+	VkRect2D scissor{};
+	scissor.offset = { 0, 0 };
+	scissor.extent = m_swapChainImageExtent;
+	vkCmdSetScissor(commandBuffer, 0, 1, &scissor);*/
+
+	vkCmdDraw(commandBuffer, 3, 1, 0, 0);
+	vkCmdEndRenderPass(commandBuffer);
+	res = vkEndCommandBuffer(commandBuffer);
+	if (res != VK_SUCCESS) {
+		throw std::runtime_error("failed to record command buffer!");
+	}
+}
+
 VkShaderModule LearnVKApp::createShaderModule(const std::vector<unsigned char>& code) {
 	VkShaderModuleCreateInfo createInfo = {};
 	createInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
@@ -615,12 +740,65 @@ QueueFamiliyIndices LearnVKApp::findDeviceQueueFamilies(VkPhysicalDevice physica
 void LearnVKApp::loop() {	// 应用的主循环
 	while (!glfwWindowShouldClose(m_window)) {
 		glfwPollEvents();
+		drawFrame();
 	}
+	vkDeviceWaitIdle(m_device);
+}
+
+void LearnVKApp::drawFrame() {
+	vkWaitForFences(m_device, 1, &m_fences[m_currentFrameIndex], VK_TRUE, MAX_TIMEOUT);
+	vkResetFences(m_device, 1, &m_fences[m_currentFrameIndex]);
+	// 从交换链获取一张图像
+	uint32_t imageIndex;
+	vkAcquireNextImageKHR(m_device, m_swapChain, MAX_TIMEOUT, m_imageAvailableSemaphore[m_currentFrameIndex], VK_NULL_HANDLE, &imageIndex);
+
+	vkResetCommandBuffer(m_commandBuffers[m_currentFrameIndex], 0);
+	recordCommandBuffers(m_commandBuffers[m_currentFrameIndex], imageIndex);
+	// 对帧缓冲附着执行指令缓冲中的渲染指令
+	VkSubmitInfo submitInfo = {};
+	submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+	VkSemaphore waitSemaphores[] = { m_imageAvailableSemaphore[m_currentFrameIndex]};
+	VkSemaphore signalSemaphores[] = { m_renderFinishSemaphore[m_currentFrameIndex]};
+	VkPipelineStageFlags waitStageFlags[] = { VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT };
+	submitInfo.waitSemaphoreCount = 1;
+	submitInfo.pWaitSemaphores = waitSemaphores;
+	submitInfo.pWaitDstStageMask = waitStageFlags;
+	submitInfo.signalSemaphoreCount = 1;
+	submitInfo.pSignalSemaphores = signalSemaphores;
+	submitInfo.commandBufferCount = 1;
+	submitInfo.pCommandBuffers = &m_commandBuffers[m_currentFrameIndex];
+	VkQueue& queue = m_queueMap["graphicsFamily"];
+	VkResult res = vkQueueSubmit(queue, 1, &submitInfo, m_fences[m_currentFrameIndex]);
+	if (res != VK_SUCCESS) {
+		throw std::runtime_error("failed to submit command buffer!");
+	}
+	// 返回渲染后的图像到交换链进行呈现操作
+	VkPresentInfoKHR presentInfo = {};
+	presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+	presentInfo.waitSemaphoreCount = 1;
+	presentInfo.pWaitSemaphores = signalSemaphores;
+	VkSwapchainKHR swapChains[] = { m_swapChain };
+	presentInfo.swapchainCount = 1;
+	presentInfo.pSwapchains = swapChains;
+	presentInfo.pImageIndices = &imageIndex;
+	queue = m_queueMap["presentFamily"];
+	res = vkQueuePresentKHR(queue,  &presentInfo);
+	m_currentFrameIndex = (m_currentFrameIndex + 1) % MAX_FRAMES_IN_FLIGHT;
 }
 
 void LearnVKApp::clear() {	// 释放Vulkan的资源
 	if (enableValidationLayers) {
 		destroyDebugUtilsMessengerEXT(m_vkInstance, &m_callBack, nullptr);
+	}
+	for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+		vkDestroySemaphore(m_device, m_imageAvailableSemaphore[i], nullptr);
+		vkDestroySemaphore(m_device, m_renderFinishSemaphore[i], nullptr);
+		vkDestroyFence(m_device, m_fences[i], nullptr);
+	}
+	
+	vkDestroyCommandPool(m_device, m_commandPool, nullptr);
+	for (auto& frameBuffer : m_swapChainFrameBuffers) {
+		vkDestroyFramebuffer(m_device, frameBuffer, nullptr);
 	}
 	vkDestroyPipeline(m_device, m_graphicsPipeline, nullptr);
 	vkDestroyPipelineLayout(m_device, m_pipelineLayout, nullptr);
@@ -702,6 +880,25 @@ void destroyDebugUtilsMessengerEXT(VkInstance instance,
 		func(instance, *pCallback, pAllocator);
 	}
 }
+
+static std::vector<char> readFile(const std::string& filename) {
+	std::ifstream file(filename, std::ios::ate | std::ios::binary);
+
+	if (!file.is_open()) {
+		throw std::runtime_error("failed to open file!");
+	}
+
+	size_t fileSize = (size_t)file.tellg();
+	std::vector<char> buffer(fileSize);
+
+	file.seekg(0);
+	file.read(buffer.data(), fileSize);
+
+	file.close();
+
+	return buffer;
+}
+
 
 int main()
 {
