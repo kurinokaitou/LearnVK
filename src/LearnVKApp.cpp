@@ -430,14 +430,14 @@ void LearnVKApp::createGraphicsPipeline() {
 	colorBlendCreateInfo.blendConstants[3] = 0.0f;
 	
 	//动态状态
-	/*VkPipelineDynamicStateCreateInfo dynamicStateCreateInfo = {};
+	VkPipelineDynamicStateCreateInfo dynamicStateCreateInfo = {};
 	VkDynamicState dynamicStates[2] = {
 		VK_DYNAMIC_STATE_VIEWPORT,
-		VK_DYNAMIC_STATE_LINE_WIDTH
+		VK_DYNAMIC_STATE_SCISSOR
 	};
 	dynamicStateCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
 	dynamicStateCreateInfo.dynamicStateCount = 2;
-	dynamicStateCreateInfo.pDynamicStates = dynamicStates;*/
+	dynamicStateCreateInfo.pDynamicStates = dynamicStates;
 
 	// 管线布局
 	VkPipelineLayoutCreateInfo layoutCreateInfo = {};
@@ -463,7 +463,7 @@ void LearnVKApp::createGraphicsPipeline() {
 	pipelineCreateInfo.pMultisampleState = &multisampleCreateInfo; // 指定多重采样设置
 	pipelineCreateInfo.pDepthStencilState = nullptr;	// 指定深度模板缓冲
 	pipelineCreateInfo.pColorBlendState = &colorBlendCreateInfo;
-	pipelineCreateInfo.pDynamicState = nullptr;
+	pipelineCreateInfo.pDynamicState = &dynamicStateCreateInfo;
 	pipelineCreateInfo.layout = m_pipelineLayout;
 
 	pipelineCreateInfo.renderPass = m_renderPass;
@@ -570,7 +570,7 @@ void LearnVKApp::recordCommandBuffers(VkCommandBuffer commandBuffer, uint32_t im
 	vkCmdBeginRenderPass(commandBuffer, &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
 	vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_graphicsPipeline);
 	
-	/*VkViewport viewport{};
+	VkViewport viewport{};
 	viewport.x = 0.0f;
 	viewport.y = 0.0f;
 	viewport.width = (float)m_swapChainImageExtent.width;
@@ -582,7 +582,7 @@ void LearnVKApp::recordCommandBuffers(VkCommandBuffer commandBuffer, uint32_t im
 	VkRect2D scissor{};
 	scissor.offset = { 0, 0 };
 	scissor.extent = m_swapChainImageExtent;
-	vkCmdSetScissor(commandBuffer, 0, 1, &scissor);*/
+	vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
 
 	vkCmdDraw(commandBuffer, 3, 1, 0, 0);
 	vkCmdEndRenderPass(commandBuffer);
@@ -717,19 +717,13 @@ QueueFamiliyIndices LearnVKApp::findDeviceQueueFamilies(VkPhysicalDevice physica
 	for (int i = 0; i < deviceQueueFamilyCount; i++) {
 		VkQueueFamilyProperties queueFamily = properties[i];
 		vkGetPhysicalDeviceSurfaceSupportKHR(physicalDevice, i, m_surface, &presentSupport);
-		if (queueFamily.queueCount > 0) {
-			if ((queueFamily.queueFlags & VK_QUEUE_GRAPHICS_BIT) && presentSupport) {
-				indices.graphicsFamily = i;
-				indices.presentFamily = i;
-				break;
-			}
-			if (queueFamily.queueFlags & VK_QUEUE_GRAPHICS_BIT) {
-				indices.graphicsFamily = i;
-			}
-			if (presentSupport) {
-				indices.presentFamily = i;
-			}
+		if (queueFamily.queueFlags & VK_QUEUE_GRAPHICS_BIT) {
+			indices.graphicsFamily = i;
 		}
+		if (presentSupport) {
+			indices.presentFamily = i;
+		}
+		if (indices.isComplete()) break;
 	}
 	indices.familiesIndexSet.insert(indices.graphicsFamily);
 	indices.familiesIndexSet.insert(indices.presentFamily);
@@ -783,6 +777,9 @@ void LearnVKApp::drawFrame() {
 	presentInfo.pImageIndices = &imageIndex;
 	queue = m_queueMap["presentFamily"];
 	res = vkQueuePresentKHR(queue,  &presentInfo);
+	if (res != VK_SUCCESS) {
+		throw std::runtime_error("failed to present to surface!");
+	}
 	m_currentFrameIndex = (m_currentFrameIndex + 1) % MAX_FRAMES_IN_FLIGHT;
 }
 
