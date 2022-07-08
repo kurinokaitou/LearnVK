@@ -17,6 +17,8 @@
 #include <algorithm>
 #include <glm/vec4.hpp>
 #include <glm/mat4x4.hpp>
+#include <vertex_vert.h>
+#include <fragment_frag.h>
 
 struct QueueFamiliyIndices
 {
@@ -84,6 +86,14 @@ private:
 
 	void createSwapChain();
 
+	void createImageViews();
+
+	void createRenderPass();
+
+	void createGraphicsPipeline();
+
+	VkShaderModule createShaderModule   (const std::vector<unsigned char>& code);
+
 	void initWindows();
 
 	void loop();
@@ -110,6 +120,16 @@ private:
 
 	// 交换链中的图像句柄，我们操作其来渲染
 	std::vector<VkImage> m_swapChainImages;
+	VkFormat m_swapChainImageFormat;
+	VkExtent2D m_swapChainImageExtent;
+
+	// 对图像进行操作的views
+	std::vector<VkImageView> m_swapChainImageViews;
+
+	// 管线
+	VkRenderPass m_renderPass;
+	VkPipelineLayout m_pipelineLayout;
+	VkPipeline m_graphicsPipeline;
 
 	std::map<std::string, VkQueue> m_queueMap;
 
@@ -126,16 +146,16 @@ private:
 #endif	
 };
 
-VkSurfaceFormatKHR chooseBestfitSurfaceFormat(std::vector<VkSurfaceFormatKHR>& formats);
+static VkSurfaceFormatKHR chooseBestfitSurfaceFormat(std::vector<VkSurfaceFormatKHR>& formats);
 
-VkPresentModeKHR chooseBestfitPresentMode(std::vector<VkPresentModeKHR>& presentModes);
+static VkPresentModeKHR chooseBestfitPresentMode(std::vector<VkPresentModeKHR>& presentModes);
 
-VkResult createDebugUtilsMessengerEXT(VkInstance instance,
+static VkResult createDebugUtilsMessengerEXT(VkInstance instance,
 	const VkDebugUtilsMessengerCreateInfoEXT* pCreateInfo,
 	const VkAllocationCallbacks* pAllocator,
 	VkDebugUtilsMessengerEXT* pCallback);
 
-void destroyDebugUtilsMessengerEXT(VkInstance instance,
+static void destroyDebugUtilsMessengerEXT(VkInstance instance,
 	VkDebugUtilsMessengerEXT* pCallback,
 	const VkAllocationCallbacks* pAllocator
 );

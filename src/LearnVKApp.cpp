@@ -23,6 +23,9 @@ void LearnVKApp::initVK() {	// 初始化Vulkan的设备
 	pickPhysicalDevice();
 	createLogicalDevice();
 	createSwapChain();
+	createImageViews();
+	createRenderPass();
+	createGraphicsPipeline();
 }
 
 void LearnVKApp::createVKInstance() {
@@ -125,11 +128,16 @@ bool LearnVKApp::checkInstanceExtentionsSupport(std::vector<const char*>& extent
 	assert(extentionCount != 0);
 	std::vector<VkExtensionProperties> extentionsProperties(extentionCount);
 	vkEnumerateInstanceExtensionProperties(nullptr, &extentionCount, extentionsProperties.data());
-	//打印可用的扩展信息
-	/*std::cout << "\t" << extentionsProperties.size() << std::endl;
+
+#ifdef PRINT_EXTENTION_INFO
+//打印可用的扩展信息
+	std::cout << "\t" << extentionsProperties.size() << std::endl;
 	for (auto& properties : extentionsProperties) {
 		std::cout << "\t" << properties.extensionName << std::endl;
-	}*/
+	}
+#endif
+
+	
 	for (const char* name : extentionsName) {
 		if (std::find_if(extentionsProperties.begin(), extentionsProperties.end(), 
 			[name](VkExtensionProperties val) {
@@ -147,11 +155,13 @@ bool LearnVKApp::checkDeviceExtentionsSupport(VkPhysicalDevice physicalDevice) {
 	assert(extentionCount != 0);
 	std::vector<VkExtensionProperties> extentionsProperties(extentionCount);
 	vkEnumerateDeviceExtensionProperties(physicalDevice ,nullptr, &extentionCount, extentionsProperties.data());
+#ifdef PRINT_EXTENTION_INFO
 	//打印可用的扩展信息
-	/*std::cout << "\t" << extentionsProperties.size() << std::endl;
+	std::cout << "\t" << extentionsProperties.size() << std::endl;
 	for (auto& properties : extentionsProperties) {
 		std::cout << "\t" << properties.extensionName << std::endl;
-	}*/
+	}
+#endif
 	for (const char* name : m_deviceExtentions) {
 		if (std::find_if(extentionsProperties.begin(), extentionsProperties.end(),
 			[name](VkExtensionProperties val) {
@@ -224,11 +234,250 @@ void LearnVKApp::createSwapChain() {
 	if (res != VK_SUCCESS) {
 		throw std::runtime_error("failed to create swap chain!");
 	}
-	uint32_t imageCount = 0;
+	uint32_t imgCount = 0;
 	// 获取交换链图像的句柄
-	vkGetSwapchainImagesKHR(m_device, m_swapChain, &imageCount, nullptr);
-	m_swapChainImages.resize(imageCount);
-	vkGetSwapchainImagesKHR(m_device, m_swapChain, &imageCount, m_swapChainImages.data());
+	vkGetSwapchainImagesKHR(m_device, m_swapChain, &imgCount, nullptr);
+	m_swapChainImages.resize(imgCount);
+	vkGetSwapchainImagesKHR(m_device, m_swapChain, &imgCount, m_swapChainImages.data());
+	m_swapChainImageFormat = surfaceFormat.format;
+	m_swapChainImageExtent = extent;
+}
+
+void LearnVKApp::createImageViews() {
+	m_swapChainImageViews.resize(m_swapChainImages.size());
+	for (int i = 0; i < m_swapChainImages.size(); i++) {
+		VkImageViewCreateInfo createInfo = {};
+		VkImage image = m_swapChainImages[i];
+		createInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+		createInfo.image = image;
+		createInfo.format = m_swapChainImageFormat;
+		createInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+		// 指定颜色的映射方式
+		createInfo.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
+		createInfo.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
+		createInfo.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
+		createInfo.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
+		// 指定哪部分图片资源可以被访问,这里被设置为渲染目标
+		createInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+		createInfo.subresourceRange.baseMipLevel = 0;
+		createInfo.subresourceRange.levelCount = 1;
+		createInfo.subresourceRange.baseArrayLayer = 0;
+		createInfo.subresourceRange.layerCount = 1;
+		// 显示创建 ImageView
+		VkResult res = vkCreateImageView(m_device, &createInfo, nullptr, &m_swapChainImageViews[i]);
+		if (res != VK_SUCCESS) {
+			throw std::runtime_error("failed to create swap chain image views!");
+		}
+	}
+}
+
+void LearnVKApp::createRenderPass() {
+	// 帧缓冲附着
+	VkAttachmentDescription colorAttachment = {};
+	colorAttachment.format = m_swapChainImageFormat;
+	colorAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
+	// 颜色和深度缓冲的存取策略
+	colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+	colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+	// stencil缓冲的存取侧率
+	colorAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+	colorAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+	colorAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+	colorAttachment.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;	// 在内存中的分布方式为用作呈现
+
+	// 附着引用
+	VkAttachmentReference colorAttachReference = {};
+	colorAttachReference.attachment = 0;	// 表示description在数组中的引用索引
+	colorAttachReference.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+	// 渲染流程可能包含多个子流程，其依赖于上一流程处理后的帧缓冲内容
+	VkSubpassDescription subpass = {};
+	subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;	// 这是一个图形渲染的子流程
+	subpass.colorAttachmentCount = 1;
+	subpass.pColorAttachments = &colorAttachReference;	// 颜色帧缓冲附着会被在frag中使用作为输出
+
+	// 渲染流程
+	VkRenderPassCreateInfo renderPassCreateInfo = {};
+	renderPassCreateInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+	renderPassCreateInfo.attachmentCount = 1;
+	renderPassCreateInfo.pAttachments = &colorAttachment;
+	renderPassCreateInfo.subpassCount = 1;
+	renderPassCreateInfo.pSubpasses = &subpass;
+	VkResult res = vkCreateRenderPass(m_device, &renderPassCreateInfo, nullptr, &m_renderPass);
+	if (res != VK_SUCCESS) {
+		throw std::runtime_error("failed to create render pass!");
+	}
+}
+
+void LearnVKApp::createGraphicsPipeline() {
+	VkResult res;
+	VkShaderModule vertexShaderModule = createShaderModule(VERTEX_VERT);
+	VkShaderModule fragmentShaderModule = createShaderModule(FRAGMENT_FRAG);
+	// 指定着色器在管线的阶段
+	VkPipelineShaderStageCreateInfo vertStageCreateInfo = {};
+	vertStageCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+	vertStageCreateInfo.pName = "main";
+	vertStageCreateInfo.module = vertexShaderModule;
+	vertStageCreateInfo.stage = VK_SHADER_STAGE_VERTEX_BIT;
+
+	VkPipelineShaderStageCreateInfo fragStageCreateInfo = {};
+	fragStageCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+	fragStageCreateInfo.pName = "main";
+	fragStageCreateInfo.module = fragmentShaderModule;
+	fragStageCreateInfo.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+
+	VkPipelineShaderStageCreateInfo shaderStages[2] = {
+		vertStageCreateInfo, fragStageCreateInfo
+	};
+
+	// 顶点输入
+	VkPipelineVertexInputStateCreateInfo vertexInputCreateInfo = {};
+	vertexInputCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+	vertexInputCreateInfo.vertexBindingDescriptionCount = 0;
+	vertexInputCreateInfo.pVertexBindingDescriptions = nullptr;
+	vertexInputCreateInfo.vertexAttributeDescriptionCount = 0;
+	vertexInputCreateInfo.pVertexAttributeDescriptions = nullptr;
+
+	// 顶点输入装配
+	VkPipelineInputAssemblyStateCreateInfo vertexAssemblyCreateInfo = {};
+	vertexAssemblyCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+	vertexAssemblyCreateInfo.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+	vertexAssemblyCreateInfo.primitiveRestartEnable = VK_FALSE;	// 是否在与STRIP图元重启索引绘制
+
+	//视口与剪裁,视口定义的是映射关系，剪裁是定义的显示区域
+	VkViewport viewport = {};
+	viewport.x = 0.0f;
+	viewport.y = 0.0f;
+	viewport.width = (float)m_swapChainImageExtent.width;
+	viewport.height = (float)m_swapChainImageExtent.height;
+	viewport.maxDepth = 1.0f;
+	viewport.minDepth = 0.0f;
+
+	VkRect2D scissor = {};
+	scissor.offset = { 0, 0 };
+	scissor.extent = m_swapChainImageExtent;
+
+	VkPipelineViewportStateCreateInfo viewportCreateInfo = {};
+	viewportCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+	viewportCreateInfo.viewportCount = 1;
+	viewportCreateInfo.pViewports = &viewport;
+	viewportCreateInfo.scissorCount = 1;
+	viewportCreateInfo.pScissors = &scissor;
+
+	// 光栅化阶段，除了fill mode外其他光栅化方式也需要GPU特性
+	VkPipelineRasterizationStateCreateInfo rasterizationCreateInfo = {};
+	rasterizationCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+	rasterizationCreateInfo.depthClampEnable = VK_FALSE;	//是否截断片元在远近平面上
+	rasterizationCreateInfo.rasterizerDiscardEnable = VK_FALSE;
+	rasterizationCreateInfo.lineWidth = 1.0f;
+	rasterizationCreateInfo.cullMode = VK_CULL_MODE_BACK_BIT;		// 剔除背面
+	rasterizationCreateInfo.frontFace = VK_FRONT_FACE_CLOCKWISE;	// 顺时针顶点序为正面
+	rasterizationCreateInfo.depthBiasEnable = VK_FALSE;	// 阴影贴图的 alias
+	rasterizationCreateInfo.depthBiasConstantFactor = 0.0f;
+	rasterizationCreateInfo.depthBiasClamp = 0.0f;
+	rasterizationCreateInfo.depthBiasSlopeFactor = 0.0f;
+
+	// 多重采样，启用需要GPU特性
+	VkPipelineMultisampleStateCreateInfo multisampleCreateInfo = {};
+	multisampleCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+	multisampleCreateInfo.sampleShadingEnable = VK_FALSE;
+	multisampleCreateInfo.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+	multisampleCreateInfo.minSampleShading = 1.0f;
+	multisampleCreateInfo.pSampleMask = nullptr;
+	multisampleCreateInfo.alphaToCoverageEnable = VK_FALSE;
+	multisampleCreateInfo.alphaToOneEnable = VK_FALSE;
+
+	// 深度与模板测试
+	// VkPipelineDepthStencilStateCreateInfo depthCreateInfo = {};
+
+	// 颜色混合
+	VkPipelineColorBlendStateCreateInfo colorBlendCreateInfo = {};	// 全局的帧缓冲设置
+	VkPipelineColorBlendAttachmentState colorBlendAttachment = {};	// 单独的帧缓冲设置
+	colorBlendAttachment.colorWriteMask =
+		VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
+		VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+	// 下面的帧缓冲设置实现是通过alpha混合实现半透明效果
+	colorBlendAttachment.blendEnable = VK_TRUE;
+	colorBlendAttachment.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
+	colorBlendAttachment.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+	colorBlendAttachment.colorBlendOp = VK_BLEND_OP_ADD;
+	colorBlendAttachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+	colorBlendAttachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
+	colorBlendAttachment.alphaBlendOp = VK_BLEND_OP_ADD;
+	// 全局帧缓冲设置
+	colorBlendCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+	colorBlendCreateInfo.logicOpEnable = VK_FALSE;	// 会禁用所有混合设置
+	colorBlendCreateInfo.logicOp = VK_LOGIC_OP_COPY;
+	colorBlendCreateInfo.attachmentCount = 1;
+	colorBlendCreateInfo.pAttachments = &colorBlendAttachment;	// 添加单独帧缓冲设置
+	colorBlendCreateInfo.blendConstants[0] = 0.0f;
+	colorBlendCreateInfo.blendConstants[1] = 0.0f;
+	colorBlendCreateInfo.blendConstants[2] = 0.0f;
+	colorBlendCreateInfo.blendConstants[3] = 0.0f;
+	
+	//动态状态
+	/*VkPipelineDynamicStateCreateInfo dynamicStateCreateInfo = {};
+	VkDynamicState dynamicStates[2] = {
+		VK_DYNAMIC_STATE_VIEWPORT,
+		VK_DYNAMIC_STATE_LINE_WIDTH
+	};
+	dynamicStateCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+	dynamicStateCreateInfo.dynamicStateCount = 2;
+	dynamicStateCreateInfo.pDynamicStates = dynamicStates;*/
+
+	// 管线布局
+	VkPipelineLayoutCreateInfo layoutCreateInfo = {};
+	layoutCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+	layoutCreateInfo.setLayoutCount = 0;
+	layoutCreateInfo.pSetLayouts = nullptr;
+	layoutCreateInfo.pushConstantRangeCount = 0;
+	layoutCreateInfo.pPushConstantRanges = nullptr;
+	res = vkCreatePipelineLayout(m_device, &layoutCreateInfo, nullptr, &m_pipelineLayout);
+	if (res != VK_SUCCESS) {
+		throw std::runtime_error("failed to create pipeline layout!");
+	}
+
+	VkGraphicsPipelineCreateInfo pipelineCreateInfo = {};
+	pipelineCreateInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+	pipelineCreateInfo.stageCount = 2;
+	pipelineCreateInfo.pStages = shaderStages;	// 指定着色器阶段
+	
+	pipelineCreateInfo.pVertexInputState = &vertexInputCreateInfo;	// 指定输入
+	pipelineCreateInfo.pInputAssemblyState = &vertexAssemblyCreateInfo;	// 指定顶点装配
+	pipelineCreateInfo.pViewportState = &viewportCreateInfo;	// 指定视口
+	pipelineCreateInfo.pRasterizationState = &rasterizationCreateInfo; // 指定光栅器设置
+	pipelineCreateInfo.pMultisampleState = &multisampleCreateInfo; // 指定多重采样设置
+	pipelineCreateInfo.pDepthStencilState = nullptr;	// 指定深度模板缓冲
+	pipelineCreateInfo.pColorBlendState = &colorBlendCreateInfo;
+	pipelineCreateInfo.pDynamicState = nullptr;
+	pipelineCreateInfo.layout = m_pipelineLayout;
+
+	pipelineCreateInfo.renderPass = m_renderPass;
+	pipelineCreateInfo.subpass = 0;	// 子流程数组中的索引
+
+	pipelineCreateInfo.basePipelineHandle = VK_NULL_HANDLE;	// 通过已有管线创造新的管线
+	pipelineCreateInfo.basePipelineIndex = -1;
+	
+	res = vkCreateGraphicsPipelines(m_device, VK_NULL_HANDLE, 1, &pipelineCreateInfo, nullptr, &m_graphicsPipeline);
+	// 其中pipelinecache 是管线缓存对象，加速管线创立
+	if (res != VK_SUCCESS) {
+		throw std::runtime_error("failed to create graphics pipeline!");
+	}
+	// 销毁创建的shaderModule
+	vkDestroyShaderModule(m_device, vertexShaderModule, nullptr);
+	vkDestroyShaderModule(m_device, fragmentShaderModule, nullptr);
+}
+
+VkShaderModule LearnVKApp::createShaderModule(const std::vector<unsigned char>& code) {
+	VkShaderModuleCreateInfo createInfo = {};
+	createInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+	createInfo.codeSize = code.size();
+	createInfo.pCode = reinterpret_cast<const uint32_t*>(code.data());
+	VkShaderModule shaderModule;
+	VkResult res = vkCreateShaderModule(m_device, &createInfo, nullptr, &shaderModule);
+	if (res != VK_SUCCESS) {
+		throw std::runtime_error("failed to create shader module!");
+	}
+	return shaderModule;
 }
 
 bool LearnVKApp::checkValidationLayersProperties() {
@@ -269,7 +518,6 @@ void LearnVKApp::pickPhysicalDevice() {
 
 // 通过获取properties 和 features然后判断是否满足需求
 bool LearnVKApp::isDeviceSuitable(VkPhysicalDevice physicalDevice) {
-	// TODO: judge device is suitable
 	VkPhysicalDeviceProperties properties = {};
 	VkPhysicalDeviceFeatures features = {};
 	vkGetPhysicalDeviceProperties(physicalDevice, &properties);
@@ -300,7 +548,7 @@ void LearnVKApp::createLogicalDevice() {
 		queueCreateInfos.push_back(queueCreateInfo);
 	}
 	
-	// TODO: 填写物理设备features
+	// 填写物理设备features
 	VkPhysicalDeviceFeatures features = {};
 
 	VkDeviceCreateInfo deviceCreateInfo = {};
@@ -373,6 +621,12 @@ void LearnVKApp::loop() {	// 应用的主循环
 void LearnVKApp::clear() {	// 释放Vulkan的资源
 	if (enableValidationLayers) {
 		destroyDebugUtilsMessengerEXT(m_vkInstance, &m_callBack, nullptr);
+	}
+	vkDestroyPipeline(m_device, m_graphicsPipeline, nullptr);
+	vkDestroyPipelineLayout(m_device, m_pipelineLayout, nullptr);
+	vkDestroyRenderPass(m_device, m_renderPass, nullptr);
+	for (auto& imageView : m_swapChainImageViews) {
+		vkDestroyImageView(m_device, imageView, nullptr);
 	}
 	vkDestroySwapchainKHR(m_device, m_swapChain, nullptr);
 	vkDestroySurfaceKHR(m_vkInstance, m_surface, nullptr);
