@@ -13,7 +13,6 @@ void LearnVKApp::run() {	// 开始运行程序
 void LearnVKApp::initWindows() {	// 初始化glfw
 	glfwInit();
 	glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-	
 	m_window = glfwCreateWindow(WINDOW_WIDTH, WINDOW_HEIGHT, "LearnVK", nullptr, nullptr);
 	glfwSetFramebufferSizeCallback(m_window, frameBufferResizeCallback);
 }
@@ -30,6 +29,7 @@ void LearnVKApp::initVK() {	// 初始化Vulkan的设备
 	createGraphicsPipeline();
 	createFrameBuffers();
 	createCommandPool();
+	createVertexBuffer();
 	createCommandBuffers();
 	createSyncObjects();
 }
@@ -351,13 +351,16 @@ void LearnVKApp::createGraphicsPipeline() {
 		vertStageCreateInfo, fragStageCreateInfo
 	};
 
+	// 获取顶点的绑定信息和属性信息
+	auto bindDesc = Vertex::getBindDescription();
+	auto attrDesc = Vertex::getAttributeDescriptions();
 	// 顶点输入
 	VkPipelineVertexInputStateCreateInfo vertexInputCreateInfo = {};
 	vertexInputCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
-	vertexInputCreateInfo.vertexBindingDescriptionCount = 0;
-	vertexInputCreateInfo.pVertexBindingDescriptions = nullptr;
-	vertexInputCreateInfo.vertexAttributeDescriptionCount = 0;
-	vertexInputCreateInfo.pVertexAttributeDescriptions = nullptr;
+	vertexInputCreateInfo.vertexBindingDescriptionCount = 1;
+	vertexInputCreateInfo.pVertexBindingDescriptions = &bindDesc;
+	vertexInputCreateInfo.vertexAttributeDescriptionCount = static_cast<uint32_t>(attrDesc.size());
+	vertexInputCreateInfo.pVertexAttributeDescriptions = attrDesc.data();
 
 	// 顶点输入装配
 	VkPipelineInputAssemblyStateCreateInfo vertexAssemblyCreateInfo = {};
@@ -520,6 +523,40 @@ void LearnVKApp::createCommandPool() {
 	}
 }
 
+void LearnVKApp::createVertexBuffer() {
+	VkBufferCreateInfo createInfo = {};
+	createInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+	createInfo.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
+	createInfo.size = sizeof(Vertex) * g_vertices.size();
+	createInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+	VkResult res = vkCreateBuffer(m_device, &createInfo, nullptr, &m_vertexBuffer);
+	if (res != VK_SUCCESS) {
+		throw std::runtime_error("failed to create vertex buffer!");
+	}
+
+	VkMemoryRequirements requirement = {};	// 获取这个缓存的内存需求
+	vkGetBufferMemoryRequirements(m_device, m_vertexBuffer, &requirement);
+	
+	VkMemoryAllocateInfo allocInfo = {};
+	allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+	allocInfo.allocationSize = requirement.size;
+	allocInfo.memoryTypeIndex = findMemoryType(requirement.memoryTypeBits, 
+		VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+	// 分配内存信息
+	res = vkAllocateMemory(m_device, &allocInfo, nullptr, &m_vertexBufferMemory);
+	if (res != VK_SUCCESS) {
+		throw std::runtime_error("failed to allocate vertex buffer memory!");
+	}
+	vkBindBufferMemory(m_device, m_vertexBuffer, m_vertexBufferMemory, 0);
+
+	// 映射内存
+	void* data; // 内存映射后的地址
+	vkMapMemory(m_device, m_vertexBufferMemory, 0, createInfo.size, 0, &data);
+	std::memcpy(data, g_vertices.data(), static_cast<size_t>(createInfo.size));
+	vkUnmapMemory(m_device, m_vertexBufferMemory);
+}
+
 void LearnVKApp::createCommandBuffers() {
 	m_commandBuffers.resize(MAX_FRAMES_IN_FLIGHT);
 	VkCommandBufferAllocateInfo allocInfo = {};
@@ -591,7 +628,12 @@ void LearnVKApp::recordCommandBuffers(VkCommandBuffer commandBuffer, uint32_t im
 	scissor.extent = m_swapChainImageExtent;
 	vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
 
-	vkCmdDraw(commandBuffer, 3, 1, 0, 0);
+	VkBuffer pBuffer[] = {m_vertexBuffer};
+	const VkDeviceSize offsets[] = {0};
+	// 开始绑定顶点缓冲
+	vkCmdBindVertexBuffers(commandBuffer, 0, 1, pBuffer, offsets);
+
+	vkCmdDraw(commandBuffer, static_cast<uint32_t>(g_vertices.size()), 1, 0, 0);
 	vkCmdEndRenderPass(commandBuffer);
 	res = vkEndCommandBuffer(commandBuffer);
 	if (res != VK_SUCCESS) {
@@ -610,6 +652,19 @@ VkShaderModule LearnVKApp::createShaderModule(const std::vector<unsigned char>& 
 		throw std::runtime_error("failed to create shader module!");
 	}
 	return shaderModule;
+}
+
+// 查找合适的内存类型
+uint32_t LearnVKApp::findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties) {
+	VkPhysicalDeviceMemoryProperties memProperties;
+	vkGetPhysicalDeviceMemoryProperties(m_physicalDevice, &memProperties);
+	for (uint32_t i = 0; i < memProperties.memoryTypeCount; i++) {
+		// typeFilter要求只需要响应位域为1， 然后目标的properties位域要与遍历元素完全相同
+		if ((typeFilter & (1 << i)) && (properties & memProperties.memoryTypes[i].propertyFlags) == properties) {	
+			return i;
+		}
+	}
+	throw std::runtime_error("failed to find suitable memory type!");
 }
 
 bool LearnVKApp::checkValidationLayersProperties() {
@@ -721,7 +776,7 @@ QueueFamiliyIndices LearnVKApp::findDeviceQueueFamilies(VkPhysicalDevice physica
 	std::vector<VkQueueFamilyProperties> properties(deviceQueueFamilyCount);
 	vkGetPhysicalDeviceQueueFamilyProperties(physicalDevice, &deviceQueueFamilyCount, properties.data());
 
-	for (int i = 0; i < deviceQueueFamilyCount; i++) {
+	for (uint32_t i = 0; i < deviceQueueFamilyCount; i++) {
 		VkQueueFamilyProperties queueFamily = properties[i];
 		vkGetPhysicalDeviceSurfaceSupportKHR(physicalDevice, i, m_surface, &presentSupport);
 		if (queueFamily.queueFlags & VK_QUEUE_GRAPHICS_BIT) {
@@ -844,6 +899,8 @@ void LearnVKApp::clear() {	// 释放Vulkan的资源
 		vkDestroySemaphore(m_device, m_renderFinishSemaphore[i], nullptr);
 		vkDestroyFence(m_device, m_fences[i], nullptr);
 	}
+	vkDestroyBuffer(m_device, m_vertexBuffer, nullptr);
+	vkFreeMemory(m_device, m_vertexBufferMemory, nullptr);
 	vkDestroyCommandPool(m_device, m_commandPool, nullptr);
 	vkDestroySurfaceKHR(m_vkInstance, m_surface, nullptr);
 	vkDestroyDevice(m_device, nullptr);

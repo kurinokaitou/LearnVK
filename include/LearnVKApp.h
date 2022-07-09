@@ -7,10 +7,12 @@
 #define GLM_FORCE_RADIANS
 #define GLM_FORCE_DEPTH_ZERO_TO_ONE
 
+#include <vulkan/vulkan.h>
 #include <GLFW/glfw3.h>
 #include <iostream>
 #include <vector>
 #include <set>
+#include <array>
 #include <map>
 #include <stdexcept>
 #include <fstream>
@@ -22,6 +24,38 @@
 
 const static uint64_t MAX_TIMEOUT = std::numeric_limits<uint64_t>::max();
 const static int MAX_FRAMES_IN_FLIGHT = 2;	// 代表预渲染队列的帧数量， 如果为1则无预渲染
+
+struct Vertex
+{
+	glm::vec2 position;
+	glm::vec3 color;
+
+	static VkVertexInputBindingDescription getBindDescription() {
+		VkVertexInputBindingDescription bindDescription = {};
+		bindDescription.binding = 0;
+		bindDescription.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+		bindDescription.stride = sizeof(Vertex);
+		return bindDescription;
+	}
+	static std::array<VkVertexInputAttributeDescription, 2> getAttributeDescriptions() {
+		std::array<VkVertexInputAttributeDescription, 2> attributeDescription{};
+		attributeDescription[0].binding = 0;
+		attributeDescription[0].location = 0;
+		attributeDescription[0].offset = offsetof(Vertex, position);
+		attributeDescription[0].format = VK_FORMAT_R32G32_SFLOAT;
+		attributeDescription[1].binding = 0;
+		attributeDescription[1].location = 1;
+		attributeDescription[1].offset = offsetof(Vertex, color);
+		attributeDescription[1].format = VK_FORMAT_R32G32B32_SFLOAT;
+		return attributeDescription;
+	}
+};
+
+const std::vector<Vertex> g_vertices = {
+	{{0.0f, -0.5f}, {1.0f, 1.0f, 0.0f}},
+	{{0.5f, 0.5f}, {0.0f, 1.0f, 1.0f}},
+	{{-0.5f, 0.5f}, {1.0f, 0.0f, 1.0f}}
+};
 
 struct QueueFamiliyIndices
 {
@@ -82,7 +116,7 @@ private:
 	QueueFamiliyIndices findDeviceQueueFamilies(VkPhysicalDevice physicalDevice);
 
 	bool isDeviceSuitable(VkPhysicalDevice device);
-	
+
 	void createSurface();
 	
 	void pickPhysicalDevice();
@@ -101,6 +135,8 @@ private:
 
 	void createCommandPool();
 
+	void createVertexBuffer();
+
 	void createCommandBuffers();
 
 	void createSyncObjects();
@@ -108,6 +144,8 @@ private:
 	void recordCommandBuffers(VkCommandBuffer commandBuffer, uint32_t imageIndex);
 
 	VkShaderModule createShaderModule(const std::vector<unsigned char>& code);
+
+	uint32_t findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties);
 
 	void initWindows();
 
@@ -169,6 +207,10 @@ private:
 	// 栅栏
 	std::vector<VkFence> m_fences;
 	int m_currentFrameIndex = 0;
+
+	// 顶点缓冲
+	VkBuffer m_vertexBuffer;
+	VkDeviceMemory m_vertexBufferMemory;
 
 	std::vector<const char*> m_validationLayers{ "VK_LAYER_KHRONOS_validation" };
 	std::vector<const char*> m_deviceExtentions{ VK_KHR_SWAPCHAIN_EXTENSION_NAME };
