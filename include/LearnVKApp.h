@@ -67,6 +67,8 @@ private:
 		void* pUserData
 	);
 
+	static void frameBufferResizeCallback(GLFWwindow* window, int width, int height);
+
 	bool checkInstanceExtentionsSupport(std::vector<const char*>& extentionName);
 
 	bool checkDeviceExtentionsSupport(VkPhysicalDevice physicalDevice);
@@ -113,9 +115,15 @@ private:
 
 	void drawFrame();
 
+	void cleanupSwapChain();
+
+	void recreateSwapChain();
+
 	void clear();
 
 	GLFWwindow* m_window = nullptr;
+
+	static bool s_framebufferResized;
 
 	VkSurfaceKHR m_surface;
 

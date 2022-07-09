@@ -2,6 +2,7 @@
 //
 #include "LearnVKApp.h"
 
+bool LearnVKApp::s_framebufferResized = false;
 void LearnVKApp::run() {	// 开始运行程序
 	initWindows();
 	initVK();
@@ -12,8 +13,9 @@ void LearnVKApp::run() {	// 开始运行程序
 void LearnVKApp::initWindows() {	// 初始化glfw
 	glfwInit();
 	glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-	glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
+	
 	m_window = glfwCreateWindow(WINDOW_WIDTH, WINDOW_HEIGHT, "LearnVK", nullptr, nullptr);
+	glfwSetFramebufferSizeCallback(m_window, frameBufferResizeCallback);
 }
 
 void LearnVKApp::initVK() {	// 初始化Vulkan的设备
@@ -112,6 +114,10 @@ VKAPI_ATTR VkBool32 VKAPI_CALL LearnVKApp::debugCallback(
 ) {
 	std::cerr << "validation error:" << pCallbackData->pMessage << std::endl;
 	return VK_FALSE;
+}
+
+void LearnVKApp::frameBufferResizeCallback(GLFWwindow* window, int width, int height) {
+	s_framebufferResized = true;
 }
 
 // 获取glfw和校验层的扩展
@@ -216,6 +222,7 @@ void LearnVKApp::createSwapChain() {
 	createInfo.imageExtent = extent;
 	createInfo.imageFormat = surfaceFormat.format;
 	createInfo.imageColorSpace = surfaceFormat.colorSpace;
+	createInfo.oldSwapchain = m_swapChain;	// 允许重建交换链在渲染时进行
 
 	QueueFamiliyIndices queueFamilyIndices = findDeviceQueueFamilies(m_physicalDevice);
 	auto familyIndicesSet = queueFamilyIndices.familiesIndexSet;
@@ -741,13 +748,19 @@ void LearnVKApp::loop() {	// 应用的主循环
 
 void LearnVKApp::drawFrame() {
 	vkWaitForFences(m_device, 1, &m_fences[m_currentFrameIndex], VK_TRUE, MAX_TIMEOUT);		// 等待某个预渲染的帧被GPU处理完毕，通过栅栏，实现不会提交过多的帧
-	vkResetFences(m_device, 1, &m_fences[m_currentFrameIndex]);
+	
 	// 从交换链获取一张图像
 	uint32_t imageIndex;
 	VkSemaphore waitSemaphores[] = { m_imageAvailableSemaphore[m_currentFrameIndex]};		// 为等待从交换链获取图片的信号量
 	VkSemaphore signalSemaphores[] = { m_renderFinishSemaphore[m_currentFrameIndex]};
-	vkAcquireNextImageKHR(m_device, m_swapChain, MAX_TIMEOUT, waitSemaphores[0], VK_NULL_HANDLE, &imageIndex);	//开始获取的同时 P(wait);当获取之后就会S(wait);
-
+	VkResult res = vkAcquireNextImageKHR(m_device, m_swapChain, MAX_TIMEOUT, waitSemaphores[0], VK_NULL_HANDLE, &imageIndex);	//开始获取的同时 P(wait);当获取之后就会S(wait);
+	if (res == VK_ERROR_OUT_OF_DATE_KHR) {
+		recreateSwapChain();
+		return;
+	} else if (res != VK_SUCCESS && res != VK_SUBOPTIMAL_KHR) {
+		throw std::runtime_error("failed to acquire swap chain!");
+	}
+	vkResetFences(m_device, 1, &m_fences[m_currentFrameIndex]);		// 后延fence的重置表示如果重建了swapChain已然可以进入这一帧
 	vkResetCommandBuffer(m_commandBuffers[m_currentFrameIndex], 0);
 	recordCommandBuffers(m_commandBuffers[m_currentFrameIndex], imageIndex);
 	// 对帧缓冲附着执行指令缓冲中的渲染指令
@@ -763,7 +776,7 @@ void LearnVKApp::drawFrame() {
 	submitInfo.commandBufferCount = 1;
 	submitInfo.pCommandBuffers = &m_commandBuffers[m_currentFrameIndex];
 	VkQueue& queue = m_queueMap["graphicsFamily"];
-	VkResult res = vkQueueSubmit(queue, 1, &submitInfo, m_fences[m_currentFrameIndex]);	// 提交渲染指令的时候一并提交这一帧的栅栏
+	res = vkQueueSubmit(queue, 1, &submitInfo, m_fences[m_currentFrameIndex]);	// 提交渲染指令的时候一并提交这一帧的栅栏
 	if (res != VK_SUCCESS) {
 		throw std::runtime_error("failed to submit command buffer!");
 	}
@@ -778,26 +791,21 @@ void LearnVKApp::drawFrame() {
 	presentInfo.pImageIndices = &imageIndex;
 	queue = m_queueMap["presentFamily"];
 	res = vkQueuePresentKHR(queue,  &presentInfo);
-	if (res != VK_SUCCESS) {
+	if (res == VK_ERROR_OUT_OF_DATE_KHR || res == VK_SUBOPTIMAL_KHR || s_framebufferResized) {
+		recreateSwapChain();
+		s_framebufferResized = true;
+	}
+	else if (res != VK_SUCCESS) {
 		throw std::runtime_error("failed to present to surface!");
 	}
 	m_currentFrameIndex = (m_currentFrameIndex + 1) % MAX_FRAMES_IN_FLIGHT;
 }
 
-void LearnVKApp::clear() {	// 释放Vulkan的资源
-	if (enableValidationLayers) {
-		destroyDebugUtilsMessengerEXT(m_vkInstance, &m_callBack, nullptr);
-	}
-	for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-		vkDestroySemaphore(m_device, m_imageAvailableSemaphore[i], nullptr);
-		vkDestroySemaphore(m_device, m_renderFinishSemaphore[i], nullptr);
-		vkDestroyFence(m_device, m_fences[i], nullptr);
-	}
-	
-	vkDestroyCommandPool(m_device, m_commandPool, nullptr);
+void LearnVKApp::cleanupSwapChain() {
 	for (auto& frameBuffer : m_swapChainFrameBuffers) {
 		vkDestroyFramebuffer(m_device, frameBuffer, nullptr);
 	}
+	vkFreeCommandBuffers(m_device, m_commandPool, static_cast<uint32_t>(m_commandBuffers.size()), m_commandBuffers.data());
 	vkDestroyPipeline(m_device, m_graphicsPipeline, nullptr);
 	vkDestroyPipelineLayout(m_device, m_pipelineLayout, nullptr);
 	vkDestroyRenderPass(m_device, m_renderPass, nullptr);
@@ -805,6 +813,38 @@ void LearnVKApp::clear() {	// 释放Vulkan的资源
 		vkDestroyImageView(m_device, imageView, nullptr);
 	}
 	vkDestroySwapchainKHR(m_device, m_swapChain, nullptr);
+}
+
+void LearnVKApp::recreateSwapChain() {
+	int width, height;
+	glfwGetFramebufferSize(m_window, &width, &height);
+	while(width == 0 || height == 0) {
+		glfwGetFramebufferSize(m_window, &width, &height);
+		glfwWaitEvents();
+	}
+	// 清理
+	vkDeviceWaitIdle(m_device);
+	cleanupSwapChain();
+	// 重建
+	createSwapChain();
+	createImageViews();
+	createRenderPass();
+	createGraphicsPipeline();
+	createFrameBuffers();
+	createCommandBuffers();
+}
+
+void LearnVKApp::clear() {	// 释放Vulkan的资源
+	if (enableValidationLayers) {
+		destroyDebugUtilsMessengerEXT(m_vkInstance, &m_callBack, nullptr);
+	}
+	cleanupSwapChain();
+	for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+		vkDestroySemaphore(m_device, m_imageAvailableSemaphore[i], nullptr);
+		vkDestroySemaphore(m_device, m_renderFinishSemaphore[i], nullptr);
+		vkDestroyFence(m_device, m_fences[i], nullptr);
+	}
+	vkDestroyCommandPool(m_device, m_commandPool, nullptr);
 	vkDestroySurfaceKHR(m_vkInstance, m_surface, nullptr);
 	vkDestroyDevice(m_device, nullptr);
 	vkDestroyInstance(m_vkInstance, nullptr);
@@ -816,7 +856,9 @@ VkExtent2D LearnVKApp::chooseSwapExtent(const VkSurfaceCapabilitiesKHR& capabili
 	if (capabilities.currentExtent.width != std::numeric_limits<uint32_t>::max()) {
 		return capabilities.currentExtent;
 	} else {
-		VkExtent2D actualExtent = {WINDOW_WIDTH, WINDOW_HEIGHT};
+		int width, height;
+		glfwGetFramebufferSize(m_window, &width, &height);
+		VkExtent2D actualExtent = {static_cast<uint32_t>(width),static_cast<uint32_t>(height) };
 		actualExtent.width = std::max(capabilities.minImageExtent.width,
 			std::min(capabilities.maxImageExtent.width, actualExtent.width));
 		actualExtent.height = std::max(capabilities.minImageExtent.height,
