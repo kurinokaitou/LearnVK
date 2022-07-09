@@ -21,7 +21,7 @@
 #include <fragment_frag.h>
 
 const static uint64_t MAX_TIMEOUT = std::numeric_limits<uint64_t>::max();
-const static int MAX_FRAMES_IN_FLIGHT = 2;
+const static int MAX_FRAMES_IN_FLIGHT = 2;	// 代表预渲染队列的帧数量， 如果为1则无预渲染
 
 struct QueueFamiliyIndices
 {

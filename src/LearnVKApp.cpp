@@ -740,37 +740,38 @@ void LearnVKApp::loop() {	// 应用的主循环
 }
 
 void LearnVKApp::drawFrame() {
-	vkWaitForFences(m_device, 1, &m_fences[m_currentFrameIndex], VK_TRUE, MAX_TIMEOUT);
+	vkWaitForFences(m_device, 1, &m_fences[m_currentFrameIndex], VK_TRUE, MAX_TIMEOUT);		// 等待某个预渲染的帧被GPU处理完毕，通过栅栏，实现不会提交过多的帧
 	vkResetFences(m_device, 1, &m_fences[m_currentFrameIndex]);
 	// 从交换链获取一张图像
 	uint32_t imageIndex;
-	vkAcquireNextImageKHR(m_device, m_swapChain, MAX_TIMEOUT, m_imageAvailableSemaphore[m_currentFrameIndex], VK_NULL_HANDLE, &imageIndex);
+	VkSemaphore waitSemaphores[] = { m_imageAvailableSemaphore[m_currentFrameIndex]};		// 为等待从交换链获取图片的信号量
+	VkSemaphore signalSemaphores[] = { m_renderFinishSemaphore[m_currentFrameIndex]};
+	vkAcquireNextImageKHR(m_device, m_swapChain, MAX_TIMEOUT, waitSemaphores[0], VK_NULL_HANDLE, &imageIndex);	//开始获取的同时 P(wait);当获取之后就会S(wait);
 
 	vkResetCommandBuffer(m_commandBuffers[m_currentFrameIndex], 0);
 	recordCommandBuffers(m_commandBuffers[m_currentFrameIndex], imageIndex);
 	// 对帧缓冲附着执行指令缓冲中的渲染指令
 	VkSubmitInfo submitInfo = {};
 	submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-	VkSemaphore waitSemaphores[] = { m_imageAvailableSemaphore[m_currentFrameIndex]};
-	VkSemaphore signalSemaphores[] = { m_renderFinishSemaphore[m_currentFrameIndex]};
+	
 	VkPipelineStageFlags waitStageFlags[] = { VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT };
 	submitInfo.waitSemaphoreCount = 1;
-	submitInfo.pWaitSemaphores = waitSemaphores;
+	submitInfo.pWaitSemaphores = waitSemaphores;	// P(wait); 在获取到图片S(wait)就submit指令
 	submitInfo.pWaitDstStageMask = waitStageFlags;
 	submitInfo.signalSemaphoreCount = 1;
-	submitInfo.pSignalSemaphores = signalSemaphores;
+	submitInfo.pSignalSemaphores = signalSemaphores;	// S(signal); 代表完成渲染，可以呈现
 	submitInfo.commandBufferCount = 1;
 	submitInfo.pCommandBuffers = &m_commandBuffers[m_currentFrameIndex];
 	VkQueue& queue = m_queueMap["graphicsFamily"];
-	VkResult res = vkQueueSubmit(queue, 1, &submitInfo, m_fences[m_currentFrameIndex]);
+	VkResult res = vkQueueSubmit(queue, 1, &submitInfo, m_fences[m_currentFrameIndex]);	// 提交渲染指令的时候一并提交这一帧的栅栏
 	if (res != VK_SUCCESS) {
 		throw std::runtime_error("failed to submit command buffer!");
 	}
 	// 返回渲染后的图像到交换链进行呈现操作
 	VkPresentInfoKHR presentInfo = {};
 	presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
-	presentInfo.waitSemaphoreCount = 1;
-	presentInfo.pWaitSemaphores = signalSemaphores;
+	presentInfo.waitSemaphoreCount = 1;		
+	presentInfo.pWaitSemaphores = signalSemaphores;		// P(signal); 申请将渲染的内容呈现
 	VkSwapchainKHR swapChains[] = { m_swapChain };
 	presentInfo.swapchainCount = 1;
 	presentInfo.pSwapchains = swapChains;
