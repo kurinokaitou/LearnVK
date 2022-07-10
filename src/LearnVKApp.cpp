@@ -29,7 +29,8 @@ void LearnVKApp::initVK() {	// 初始化Vulkan的设备
 	createGraphicsPipeline();
 	createFrameBuffers();
 	createCommandPool();
-	createVertexBuffer();
+	createLocalBuffer(g_vertices, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, m_vertexBuffer, m_vertexBufferMemory);
+	createLocalBuffer(g_indices, VK_BUFFER_USAGE_INDEX_BUFFER_BIT, m_indexBuffer, m_indexBufferMemory);
 	createCommandBuffers();
 	createSyncObjects();
 }
@@ -524,8 +525,9 @@ void LearnVKApp::createCommandPool() {
 	}
 }
 
-void LearnVKApp::createVertexBuffer() {
-	VkDeviceSize bufferSize = sizeof(g_vertices[0]) * g_vertices.size();
+template<typename T>
+void LearnVKApp::createLocalBuffer(const std::vector<T>& info, VkBufferUsageFlags usage, VkBuffer& buffer, VkDeviceMemory& memory) {
+	VkDeviceSize bufferSize = sizeof(info[0]) * info.size();
 	VkBuffer stageBuffer;
 	VkDeviceMemory stageBufferMemory;
 	// 创建暂存缓存区
@@ -536,14 +538,14 @@ void LearnVKApp::createVertexBuffer() {
 	// 映射内存
 	void* data; // 内存映射后的地址
 	vkMapMemory(m_device, stageBufferMemory, 0, bufferSize, 0, &data);
-	std::memcpy(data, g_vertices.data(), static_cast<size_t>(bufferSize));
+	std::memcpy(data, info.data(), static_cast<size_t>(bufferSize));
 	vkUnmapMemory(m_device, stageBufferMemory);
 	// 创建CPU不可访问的顶点缓存
-	createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+	createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | usage,
 		VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-		m_vertexBuffer, m_vertexBufferMemory
+		buffer, memory
 	);
-	copyBuffer(stageBuffer, m_vertexBuffer, bufferSize);
+	copyBuffer(stageBuffer, buffer, bufferSize);
 	vkDestroyBuffer(m_device, stageBuffer, nullptr);
 	vkFreeMemory(m_device, stageBufferMemory, nullptr);
 }
@@ -654,8 +656,10 @@ void LearnVKApp::recordCommandBuffers(VkCommandBuffer commandBuffer, uint32_t im
 	const VkDeviceSize offsets[] = {0};
 	// 开始绑定顶点缓冲
 	vkCmdBindVertexBuffers(commandBuffer, 0, 1, pBuffer, offsets);
-
-	vkCmdDraw(commandBuffer, static_cast<uint32_t>(g_vertices.size()), 1, 0, 0);
+	// 开始绑定顶点索引
+	vkCmdBindIndexBuffer(commandBuffer, m_indexBuffer, 0, VK_INDEX_TYPE_UINT16);
+	//vkCmdDraw(commandBuffer, static_cast<uint32_t>(g_vertices.size()), 1, 0, 0);
+	vkCmdDrawIndexed(commandBuffer, static_cast<uint32_t>(g_indices.size()), 1, 0, 0, 0);
 	vkCmdEndRenderPass(commandBuffer);
 	res = vkEndCommandBuffer(commandBuffer);
 	if (res != VK_SUCCESS) {
@@ -923,6 +927,9 @@ void LearnVKApp::clear() {	// 释放Vulkan的资源
 	}
 	vkDestroyBuffer(m_device, m_vertexBuffer, nullptr);
 	vkFreeMemory(m_device, m_vertexBufferMemory, nullptr);
+	vkDestroyBuffer(m_device, m_indexBuffer, nullptr);
+	vkFreeMemory(m_device, m_indexBufferMemory, nullptr);
+
 	vkDestroyCommandPool(m_device, m_commandPool, nullptr);
 	vkDestroySurfaceKHR(m_vkInstance, m_surface, nullptr);
 	vkDestroyDevice(m_device, nullptr);

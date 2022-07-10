@@ -58,7 +58,9 @@ const std::vector<Vertex> g_vertices = {
 	{{-0.5f, 0.5f}, {1.0f, 1.0f, 1.0f}}
 };
 
-
+const std::vector<uint16_t> g_indices = {
+	0, 1, 2, 2, 3, 0
+};
 
 struct QueueFamiliyIndices
 {
@@ -138,7 +140,8 @@ private:
 
 	void createCommandPool();
 
-	void createVertexBuffer();
+	template<typename T>
+	void createLocalBuffer(const std::vector<T>& data, VkBufferUsageFlags usage, VkBuffer& buffer, VkDeviceMemory& memory);
 
 	void createCommandBuffers();
 
@@ -218,6 +221,9 @@ private:
 	// 顶点缓冲
 	VkBuffer m_vertexBuffer;
 	VkDeviceMemory m_vertexBufferMemory;
+	// 索引缓存
+	VkBuffer m_indexBuffer;
+	VkDeviceMemory m_indexBufferMemory;
 
 	std::vector<const char*> m_validationLayers{ "VK_LAYER_KHRONOS_validation" };
 	std::vector<const char*> m_deviceExtentions{ VK_KHR_SWAPCHAIN_EXTENSION_NAME };
