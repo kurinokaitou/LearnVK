@@ -984,7 +984,7 @@ void LearnVKApp::drawFrame() {
 	res = vkQueuePresentKHR(queue,  &presentInfo);
 	if (res == VK_ERROR_OUT_OF_DATE_KHR || res == VK_SUBOPTIMAL_KHR || s_framebufferResized) {
 		recreateSwapChain();
-		s_framebufferResized = true;
+		s_framebufferResized = false;
 	}
 	else if (res != VK_SUCCESS) {
 		throw std::runtime_error("failed to present to surface!");
