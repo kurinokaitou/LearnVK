@@ -52,10 +52,13 @@ struct Vertex
 };
 
 const std::vector<Vertex> g_vertices = {
-	{{0.0f, -0.5f}, {1.0f, 1.0f, 0.0f}},
-	{{0.5f, 0.5f}, {0.0f, 1.0f, 1.0f}},
-	{{-0.5f, 0.5f}, {1.0f, 0.0f, 1.0f}}
+	{{-0.5f, -0.5f}, {1.0f, 0.0f, 0.0f}},
+	{{0.5f, -0.5f}, {0.0f, 1.0f, 0.0f}},
+	{{0.5f, 0.5f}, {0.0f, 0.0f, 1.0f}},
+	{{-0.5f, 0.5f}, {1.0f, 1.0f, 1.0f}}
 };
+
+
 
 struct QueueFamiliyIndices
 {
@@ -147,6 +150,10 @@ private:
 
 	uint32_t findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties);
 
+	void createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties, VkBuffer& buffer, VkDeviceMemory& memory);
+
+	void copyBuffer(VkBuffer& srcBuffer, VkBuffer& dstBuffer, VkDeviceSize size);
+
 	void initWindows();
 
 	void loop();
@@ -224,7 +231,6 @@ private:
 	const bool enableValidationLayers = true;
 #endif	
 };
-
 static VkSurfaceFormatKHR chooseBestfitSurfaceFormat(std::vector<VkSurfaceFormatKHR>& formats);
 
 static VkPresentModeKHR chooseBestfitPresentMode(std::vector<VkPresentModeKHR>& presentModes);

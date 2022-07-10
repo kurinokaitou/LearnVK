@@ -290,15 +290,16 @@ void LearnVKApp::createRenderPass() {
 	// 颜色和深度缓冲的存取策略
 	colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
 	colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-	// stencil缓冲的存取侧率
+	// stencil缓冲的存取策略
 	colorAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
 	colorAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+
 	colorAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-	colorAttachment.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;	// 在内存中的分布方式为用作呈现
+	colorAttachment.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;	// 在内存中的分布方式为用作呈现方式
 
 	// 附着引用
 	VkAttachmentReference colorAttachReference = {};
-	colorAttachReference.attachment = 0;	// 表示description在数组中的引用索引
+	colorAttachReference.attachment = 0;	// 表示attachment在数组中的引用索引，也是shader中片元最终输出时layout (location = 0)的索引
 	colorAttachReference.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 	// 渲染流程可能包含多个子流程，其依赖于上一流程处理后的帧缓冲内容
 	VkSubpassDescription subpass = {};
@@ -524,37 +525,58 @@ void LearnVKApp::createCommandPool() {
 }
 
 void LearnVKApp::createVertexBuffer() {
-	VkBufferCreateInfo createInfo = {};
-	createInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-	createInfo.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
-	createInfo.size = sizeof(Vertex) * g_vertices.size();
-	createInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-	VkResult res = vkCreateBuffer(m_device, &createInfo, nullptr, &m_vertexBuffer);
-	if (res != VK_SUCCESS) {
-		throw std::runtime_error("failed to create vertex buffer!");
-	}
-
-	VkMemoryRequirements requirement = {};	// 获取这个缓存的内存需求
-	vkGetBufferMemoryRequirements(m_device, m_vertexBuffer, &requirement);
-	
-	VkMemoryAllocateInfo allocInfo = {};
-	allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-	allocInfo.allocationSize = requirement.size;
-	allocInfo.memoryTypeIndex = findMemoryType(requirement.memoryTypeBits, 
-		VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-	// 分配内存信息
-	res = vkAllocateMemory(m_device, &allocInfo, nullptr, &m_vertexBufferMemory);
-	if (res != VK_SUCCESS) {
-		throw std::runtime_error("failed to allocate vertex buffer memory!");
-	}
-	vkBindBufferMemory(m_device, m_vertexBuffer, m_vertexBufferMemory, 0);
-
+	VkDeviceSize bufferSize = sizeof(g_vertices[0]) * g_vertices.size();
+	VkBuffer stageBuffer;
+	VkDeviceMemory stageBufferMemory;
+	// 创建暂存缓存区
+	createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+		VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+		stageBuffer, stageBufferMemory
+	);
 	// 映射内存
 	void* data; // 内存映射后的地址
-	vkMapMemory(m_device, m_vertexBufferMemory, 0, createInfo.size, 0, &data);
-	std::memcpy(data, g_vertices.data(), static_cast<size_t>(createInfo.size));
-	vkUnmapMemory(m_device, m_vertexBufferMemory);
+	vkMapMemory(m_device, stageBufferMemory, 0, bufferSize, 0, &data);
+	std::memcpy(data, g_vertices.data(), static_cast<size_t>(bufferSize));
+	vkUnmapMemory(m_device, stageBufferMemory);
+	// 创建CPU不可访问的顶点缓存
+	createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+		VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+		m_vertexBuffer, m_vertexBufferMemory
+	);
+	copyBuffer(stageBuffer, m_vertexBuffer, bufferSize);
+	vkDestroyBuffer(m_device, stageBuffer, nullptr);
+	vkFreeMemory(m_device, stageBufferMemory, nullptr);
+}
+
+void LearnVKApp::copyBuffer(VkBuffer& srcBuffer, VkBuffer& dstBuffer, VkDeviceSize size) {
+	VkCommandBufferAllocateInfo allocInfo = {};
+	allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+	allocInfo.commandPool = m_commandPool;
+	allocInfo.commandBufferCount = 1;
+	allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+	VkCommandBuffer commandBuffer;
+	vkAllocateCommandBuffers(m_device, &allocInfo, &commandBuffer);
+	
+	VkCommandBufferBeginInfo beginInfo = {};
+	beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+	beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+	vkBeginCommandBuffer(commandBuffer, &beginInfo);
+
+	VkBufferCopy bufferCopyRegion = {};
+	bufferCopyRegion.size = size;
+	bufferCopyRegion.srcOffset = 0;
+	bufferCopyRegion.dstOffset = 0;
+	vkCmdCopyBuffer(commandBuffer, srcBuffer, dstBuffer, 1, &bufferCopyRegion);
+	vkEndCommandBuffer(commandBuffer);
+	
+	VkSubmitInfo submitInfo = {};
+	submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+	submitInfo.commandBufferCount = 1;
+	submitInfo.pCommandBuffers = &commandBuffer;
+	VkQueue queue = m_queueMap["graphicsFamily"];
+	vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE);
+	vkQueueWaitIdle(queue);
+	vkFreeCommandBuffers(m_device, m_commandPool, 1, &commandBuffer);
 }
 
 void LearnVKApp::createCommandBuffers() {
@@ -922,6 +944,31 @@ VkExtent2D LearnVKApp::chooseSwapExtent(const VkSurfaceCapabilitiesKHR& capabili
 			std::min(capabilities.maxImageExtent.height, actualExtent.height));
 		return actualExtent;
 	}
+}
+
+void LearnVKApp::createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties, VkBuffer& buffer, VkDeviceMemory& memory) {
+	VkBufferCreateInfo createInfo = {};
+	createInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+	createInfo.size = size;
+	createInfo.usage = usage;
+	createInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+	VkResult res = vkCreateBuffer(m_device, &createInfo, nullptr, &buffer);
+	if (res != VK_SUCCESS) {
+		throw std::runtime_error("failed to create buffer!");
+	}
+
+	VkMemoryRequirements memReq = {};
+	vkGetBufferMemoryRequirements(m_device, buffer, &memReq);
+
+	VkMemoryAllocateInfo allocInfo = {};
+	allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+	allocInfo.allocationSize = memReq.size;
+	allocInfo.memoryTypeIndex = findMemoryType(memReq.memoryTypeBits, properties);
+	res = vkAllocateMemory(m_device, &allocInfo, nullptr, &memory);
+	if (res != VK_SUCCESS) {
+		throw std::runtime_error("failed to allocate buffer memory!");
+	}
+	vkBindBufferMemory(m_device, buffer, memory, 0);
 }
 
 // 选择一个最好的格式，如果有SRGB就选SRGB
