@@ -26,11 +26,15 @@ void LearnVKApp::initVK() {	// 初始化Vulkan的设备
 	createSwapChain();
 	createImageViews();
 	createRenderPass();
+	createDescriptorSetLayout();
 	createGraphicsPipeline();
 	createFrameBuffers();
 	createCommandPool();
 	createLocalBuffer(g_vertices, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, m_vertexBuffer, m_vertexBufferMemory);
 	createLocalBuffer(g_indices, VK_BUFFER_USAGE_INDEX_BUFFER_BIT, m_indexBuffer, m_indexBufferMemory);
+	createUniformBuffers();
+	createDescriptorPool();
+	createDescriptorSets();
 	createCommandBuffers();
 	createSyncObjects();
 }
@@ -332,6 +336,24 @@ void LearnVKApp::createRenderPass() {
 	}
 }
 
+void LearnVKApp::createDescriptorSetLayout() {
+	VkDescriptorSetLayoutBinding layoutBindingInfo = {};
+	layoutBindingInfo.binding = 0;
+	layoutBindingInfo.descriptorCount = 1;
+	layoutBindingInfo.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+	layoutBindingInfo.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+	layoutBindingInfo.pImmutableSamplers = nullptr;
+
+	VkDescriptorSetLayoutCreateInfo createInfo = {};
+	createInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+	createInfo.bindingCount = 1;
+	createInfo.pBindings = &layoutBindingInfo;
+	VkResult res = vkCreateDescriptorSetLayout(m_device, &createInfo, nullptr, &m_descriptorSetLayout);
+	if (res != VK_SUCCESS) {
+		throw std::runtime_error("failed to create descriptor set layout!");
+	}
+}
+
 void LearnVKApp::createGraphicsPipeline() {
 	VkResult res;
 	VkShaderModule vertexShaderModule = createShaderModule(VERTEX_VERT);
@@ -397,7 +419,7 @@ void LearnVKApp::createGraphicsPipeline() {
 	rasterizationCreateInfo.rasterizerDiscardEnable = VK_FALSE;
 	rasterizationCreateInfo.lineWidth = 1.0f;
 	rasterizationCreateInfo.cullMode = VK_CULL_MODE_BACK_BIT;		// 剔除背面
-	rasterizationCreateInfo.frontFace = VK_FRONT_FACE_CLOCKWISE;	// 顺时针顶点序为正面
+	rasterizationCreateInfo.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;	// 逆时针顶点序为正面
 	rasterizationCreateInfo.depthBiasEnable = VK_FALSE;	// 阴影贴图的 alias
 	rasterizationCreateInfo.depthBiasConstantFactor = 0.0f;
 	rasterizationCreateInfo.depthBiasClamp = 0.0f;
@@ -454,8 +476,8 @@ void LearnVKApp::createGraphicsPipeline() {
 	// 管线布局
 	VkPipelineLayoutCreateInfo layoutCreateInfo = {};
 	layoutCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-	layoutCreateInfo.setLayoutCount = 0;
-	layoutCreateInfo.pSetLayouts = nullptr;
+	layoutCreateInfo.setLayoutCount = 1;
+	layoutCreateInfo.pSetLayouts = &m_descriptorSetLayout;
 	layoutCreateInfo.pushConstantRangeCount = 0;
 	layoutCreateInfo.pPushConstantRanges = nullptr;
 	res = vkCreatePipelineLayout(m_device, &layoutCreateInfo, nullptr, &m_pipelineLayout);
@@ -527,7 +549,7 @@ void LearnVKApp::createCommandPool() {
 
 template<typename T>
 void LearnVKApp::createLocalBuffer(const std::vector<T>& info, VkBufferUsageFlags usage, VkBuffer& buffer, VkDeviceMemory& memory) {
-	VkDeviceSize bufferSize = sizeof(info[0]) * info.size();
+	VkDeviceSize bufferSize = sizeof(T) * info.size();
 	VkBuffer stageBuffer;
 	VkDeviceMemory stageBufferMemory;
 	// 创建暂存缓存区
@@ -579,6 +601,74 @@ void LearnVKApp::copyBuffer(VkBuffer& srcBuffer, VkBuffer& dstBuffer, VkDeviceSi
 	vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE);
 	vkQueueWaitIdle(queue);
 	vkFreeCommandBuffers(m_device, m_commandPool, 1, &commandBuffer);
+}
+
+void LearnVKApp::createUniformBuffers() {
+	VkDeviceSize bufferSize = sizeof(UniformBufferObject);
+	// 每一个swapchain image一个ubo buffer
+	size_t imagesNum = m_swapChainImages.size();
+	m_uboBuffers.resize(imagesNum);
+	m_uboBufferMemories.resize(imagesNum);
+	for (int i = 0; i < imagesNum; i++) {
+		createBuffer(bufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+			m_uboBuffers[i], m_uboBufferMemories[i]
+		);
+	}
+}
+
+void LearnVKApp::createDescriptorPool() {
+	VkDescriptorPoolSize poolSize = {};
+	uint32_t imageCount = static_cast<uint32_t>(m_swapChainImages.size());
+	poolSize.descriptorCount = imageCount;
+	poolSize.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+
+
+	VkDescriptorPoolCreateInfo createInfo = {};
+	createInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+	createInfo.poolSizeCount = 1;
+	createInfo.pPoolSizes = &poolSize;
+	createInfo.maxSets = imageCount;
+
+	VkResult res = vkCreateDescriptorPool(m_device, &createInfo, nullptr, &m_descriptorPool);
+	if (res != VK_SUCCESS) {
+		throw std::runtime_error("failed to create descriptor pool!");
+	}
+}
+
+void LearnVKApp::createDescriptorSets() {
+	size_t imageCount = m_swapChainImages.size();
+	std::vector<VkDescriptorSetLayout> layouts(imageCount, m_descriptorSetLayout);
+	VkDescriptorSetAllocateInfo allocInfo = {};
+	allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+	allocInfo.descriptorPool = m_descriptorPool;
+	allocInfo.descriptorSetCount = static_cast<uint32_t>(imageCount);
+	allocInfo.pSetLayouts = layouts.data();
+
+	m_descriptorSets.resize(imageCount);
+	VkResult res = vkAllocateDescriptorSets(m_device, &allocInfo, m_descriptorSets.data());
+	if (res != VK_SUCCESS) {
+		throw std::runtime_error("failed to create descriptor sets!");
+	}
+
+	for (int i = 0; i < imageCount; i++) {
+		VkDescriptorBufferInfo bufferInfo = {};
+		bufferInfo.buffer = m_uboBuffers[i];
+		bufferInfo.range = sizeof(UniformBufferObject);
+		bufferInfo.offset = 0;
+
+		VkWriteDescriptorSet descWrite = {};
+		descWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+		descWrite.dstSet = m_descriptorSets[i];
+		descWrite.dstBinding = 0;
+		descWrite.dstArrayElement = 0;
+		descWrite.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+		descWrite.descriptorCount = 1;
+		descWrite.pBufferInfo = &bufferInfo;
+		descWrite.pImageInfo = nullptr;			//指定引用的图像
+		descWrite.pTexelBufferView = nullptr;	// 指定缓冲
+		vkUpdateDescriptorSets(m_device, 1, &descWrite, 0, nullptr);
+	}
 }
 
 void LearnVKApp::createCommandBuffers() {
@@ -658,6 +748,7 @@ void LearnVKApp::recordCommandBuffers(VkCommandBuffer commandBuffer, uint32_t im
 	vkCmdBindVertexBuffers(commandBuffer, 0, 1, pBuffer, offsets);
 	// 开始绑定顶点索引
 	vkCmdBindIndexBuffer(commandBuffer, m_indexBuffer, 0, VK_INDEX_TYPE_UINT16);
+	vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipelineLayout, 0, 1, &m_descriptorSets[imageIndex], 0, nullptr);
 	//vkCmdDraw(commandBuffer, static_cast<uint32_t>(g_vertices.size()), 1, 0, 0);
 	vkCmdDrawIndexed(commandBuffer, static_cast<uint32_t>(g_indices.size()), 1, 0, 0, 0);
 	vkCmdEndRenderPass(commandBuffer);
@@ -827,6 +918,24 @@ void LearnVKApp::loop() {	// 应用的主循环
 	vkDeviceWaitIdle(m_device);
 }
 
+void LearnVKApp::updateUniformBuffers(uint32_t imageIndex) {
+	static auto startTime = std::chrono::high_resolution_clock::now();
+
+	auto currentTime = std::chrono::high_resolution_clock::now();
+	float time = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
+	UniformBufferObject ubo = {};
+	ubo.model = glm::rotate(glm::mat4(1.0f), time * glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f)); // 以Z轴为轴每秒旋转90°
+	ubo.view = glm::lookAt(glm::vec3(2.0f, 2.0f, 2.0f), glm::vec3(0, 0, 0), glm::vec3(0.0f, 0.0f, 1.0f));	// 从(2,2,2)看向(0,0,0)
+	ubo.proj = glm::perspective(glm::radians(45.0f), 
+		m_swapChainImageExtent.width / static_cast<float>(m_swapChainImageExtent.height), 0.1f, 10.0f);	// 投影矩阵，fov:45 平截头体近0.1远10
+	ubo.proj[1][1] *= -1; // 因为OpenGL与Vulkan的y轴正方向是反的，因此需要将y轴缩放系数取相反数
+
+	void* data;
+	vkMapMemory(m_device, m_uboBufferMemories[imageIndex], 0, sizeof(ubo), 0, &data);
+	std::memcpy(data, &ubo, sizeof(ubo));
+	vkUnmapMemory(m_device, m_uboBufferMemories[imageIndex]);
+}
+
 void LearnVKApp::drawFrame() {
 	vkWaitForFences(m_device, 1, &m_fences[m_currentFrameIndex], VK_TRUE, MAX_TIMEOUT);		// 等待某个预渲染的帧被GPU处理完毕，通过栅栏，实现不会提交过多的帧
 	
@@ -842,6 +951,7 @@ void LearnVKApp::drawFrame() {
 		throw std::runtime_error("failed to acquire swap chain!");
 	}
 	vkResetFences(m_device, 1, &m_fences[m_currentFrameIndex]);		// 后延fence的重置表示如果重建了swapChain已然可以进入这一帧
+	updateUniformBuffers(imageIndex);
 	vkResetCommandBuffer(m_commandBuffers[m_currentFrameIndex], 0);
 	recordCommandBuffers(m_commandBuffers[m_currentFrameIndex], imageIndex);
 	// 对帧缓冲附着执行指令缓冲中的渲染指令
@@ -915,6 +1025,17 @@ void LearnVKApp::recreateSwapChain() {
 	createCommandBuffers();
 }
 
+void LearnVKApp::clearBuffers() {
+	for (int i = 0; i < m_swapChainImages.size(); i++) {
+		vkDestroyBuffer(m_device, m_uboBuffers[i], nullptr);
+		vkFreeMemory(m_device, m_uboBufferMemories[i], nullptr);
+	}
+	vkDestroyBuffer(m_device, m_vertexBuffer, nullptr);
+	vkFreeMemory(m_device, m_vertexBufferMemory, nullptr);
+	vkDestroyBuffer(m_device, m_indexBuffer, nullptr);
+	vkFreeMemory(m_device, m_indexBufferMemory, nullptr);
+}
+
 void LearnVKApp::clear() {	// 释放Vulkan的资源
 	if (enableValidationLayers) {
 		destroyDebugUtilsMessengerEXT(m_vkInstance, &m_callBack, nullptr);
@@ -925,10 +1046,10 @@ void LearnVKApp::clear() {	// 释放Vulkan的资源
 		vkDestroySemaphore(m_device, m_renderFinishSemaphore[i], nullptr);
 		vkDestroyFence(m_device, m_fences[i], nullptr);
 	}
-	vkDestroyBuffer(m_device, m_vertexBuffer, nullptr);
-	vkFreeMemory(m_device, m_vertexBufferMemory, nullptr);
-	vkDestroyBuffer(m_device, m_indexBuffer, nullptr);
-	vkFreeMemory(m_device, m_indexBufferMemory, nullptr);
+	vkDestroyDescriptorSetLayout(m_device, m_descriptorSetLayout, nullptr);
+	vkDestroyDescriptorPool(m_device, m_descriptorPool, nullptr);
+
+	clearBuffers();
 
 	vkDestroyCommandPool(m_device, m_commandPool, nullptr);
 	vkDestroySurfaceKHR(m_vkInstance, m_surface, nullptr);

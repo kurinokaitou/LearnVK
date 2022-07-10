@@ -10,6 +10,7 @@
 #include <vulkan/vulkan.h>
 #include <GLFW/glfw3.h>
 #include <iostream>
+#include <chrono>
 #include <vector>
 #include <set>
 #include <array>
@@ -19,6 +20,7 @@
 #include <algorithm>
 #include <glm/vec4.hpp>
 #include <glm/mat4x4.hpp>
+#include <glm/gtc/matrix_transform.hpp>
 #include <vertex_vert.h>
 #include <fragment_frag.h>
 
@@ -85,6 +87,13 @@ struct SwapChainSupportDetails
 	std::vector<VkPresentModeKHR> presentModes;
 };
 
+struct UniformBufferObject
+{
+	glm::mat4 model;
+	glm::mat4 view;
+	glm::mat4 proj;
+};
+
 class LearnVKApp
 {
 public:
@@ -134,6 +143,8 @@ private:
 
 	void createRenderPass();
 
+	void createDescriptorSetLayout();
+
 	void createGraphicsPipeline();
 
 	void createFrameBuffers();
@@ -142,6 +153,12 @@ private:
 
 	template<typename T>
 	void createLocalBuffer(const std::vector<T>& data, VkBufferUsageFlags usage, VkBuffer& buffer, VkDeviceMemory& memory);
+
+	void createUniformBuffers();
+
+	void createDescriptorPool();
+
+	void createDescriptorSets();
 
 	void createCommandBuffers();
 
@@ -161,11 +178,15 @@ private:
 
 	void loop();
 
+	void updateUniformBuffers(uint32_t imageIndex);
+
 	void drawFrame();
 
 	void cleanupSwapChain();
 
 	void recreateSwapChain();
+
+	void clearBuffers();
 
 	void clear();
 
@@ -197,13 +218,16 @@ private:
 	// 对图像进行操作的views
 	std::vector<VkImageView> m_swapChainImageViews;
 	// 缓冲区
-	std::vector<VkFramebuffer> m_swapChainFrameBuffers;
+	std::vector<VkFramebuffer> m_swapChainFrameBuffers; 
 
 	// 管线
 	VkRenderPass m_renderPass;
 	VkPipelineLayout m_pipelineLayout;
 	VkPipeline m_graphicsPipeline;
-
+	// 描述符集和描述符池
+	VkDescriptorSetLayout m_descriptorSetLayout;
+	VkDescriptorPool m_descriptorPool;
+	std::vector<VkDescriptorSet> m_descriptorSets;
 	// 队列族对应的指令队列
 	std::map<std::string, VkQueue> m_queueMap;
 
@@ -224,6 +248,9 @@ private:
 	// 索引缓存
 	VkBuffer m_indexBuffer;
 	VkDeviceMemory m_indexBufferMemory;
+	// ubo缓存，每一个交换链一个
+	std::vector<VkBuffer> m_uboBuffers;
+	std::vector<VkDeviceMemory> m_uboBufferMemories;
 
 	std::vector<const char*> m_validationLayers{ "VK_LAYER_KHRONOS_validation" };
 	std::vector<const char*> m_deviceExtentions{ VK_KHR_SWAPCHAIN_EXTENSION_NAME };
