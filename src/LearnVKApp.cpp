@@ -30,6 +30,7 @@ void LearnVKApp::initVK() {	// 初始化Vulkan的设备
 	createGraphicsPipeline();
 	createFrameBuffers();
 	createCommandPool();
+	createDepthResources();
 	createTextureImage();
 	createTextureImageView();
 	createTextureSampler();
@@ -562,6 +563,10 @@ void LearnVKApp::createCommandPool() {
 	if (res != VK_SUCCESS) {
 		throw std::runtime_error("failed to create command pool!");
 	}
+}
+
+void LearnVKApp::createDepthResources() {
+	
 }
 
 void LearnVKApp::createTextureImage() {
