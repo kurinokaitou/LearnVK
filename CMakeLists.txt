@@ -7,6 +7,9 @@ set(VCPKG_PATH $ENV{VCPKG_ROOT_PATH})
 set(VCPKG_ROOT ${VCPKG_PATH}/scripts/buildsystems/vcpkg.cmake CACHE PATH "")
 set(CMAKE_TOOLCHAIN_FILE ${VCPKG_ROOT})
 
+# compile_commands.json
+# set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
 # 项目设置
 project ("LearnVK")
 set(CMAKE_CXX_STANDARD 17)

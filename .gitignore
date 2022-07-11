@@ -34,4 +34,5 @@
 # directories
 /build
 /.vs
+/.cache
 

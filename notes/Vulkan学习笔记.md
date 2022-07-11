@@ -214,7 +214,7 @@ bool LearnVKApp::checkValidationLayersProperties() {
 	// 检查所有m_validationLayers中要求的layer层是否都支持
 	for (auto& layer : m_validationLayers) {
 		if (std::find_if(availableLayers.begin(), availableLayers.end(), [layer](VkLayerProperties properties) {
-			return std::strcmp(properties.layerName, layer) == 0;
+			return strcmp(properties.layerName, layer) == 0;
 			}) == availableLayers.end()) {
 			return false;
 		}
