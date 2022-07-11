@@ -6,6 +6,8 @@
 #define GLFW_INCLUDE_VULKAN
 #define GLM_FORCE_RADIANS
 #define GLM_FORCE_DEPTH_ZERO_TO_ONE
+#define STB_IMAGE_IMPLEMENTATION
+#define PRINT_EXTENTION_INFO
 
 #include <vulkan/vulkan.h>
 #include <GLFW/glfw3.h>
@@ -17,15 +19,21 @@
 #include <map>
 #include <stdexcept>
 #include <fstream>
+#include <filesystem>
 #include <algorithm>
 #include <glm/vec4.hpp>
 #include <glm/mat4x4.hpp>
 #include <glm/gtc/matrix_transform.hpp>
+#include <vendor/stb_image.h>
+
 #include <vertex_vert.h>
 #include <fragment_frag.h>
 
 const static uint64_t MAX_TIMEOUT = std::numeric_limits<uint64_t>::max();
 const static int MAX_FRAMES_IN_FLIGHT = 2;	// 代表预渲染队列的帧数量， 如果为1则无预渲染
+const static std::string CURRENT_PATH = std::filesystem::current_path().generic_string();
+const static std::string RESOURCE_PATH = std::filesystem::current_path().parent_path().parent_path().generic_string() + "/resource/";
+const static std::string TEXTURE_PATH = RESOURCE_PATH + "textures/";
 
 struct Vertex
 {
@@ -151,6 +159,21 @@ private:
 
 	void createCommandPool();
 
+	void createTextureImage();
+
+	void createImage(uint32_t width, uint32_t height, VkFormat format, VkImageTiling tiling, VkImageUsageFlags usags,
+		VkMemoryPropertyFlags properties, VkImage& image, VkDeviceMemory& memory);
+
+	void transitionImageLayout(VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout);
+
+	void copyBufferToImage(VkBuffer buffer, VkImage image, uint32_t width, uint32_t height);
+
+	void createTextureImageView();
+
+	void createTextureSampler();
+
+	VkImageView createImageView(VkImage image, VkFormat format);
+
 	template<typename T>
 	void createLocalBuffer(const std::vector<T>& data, VkBufferUsageFlags usage, VkBuffer& buffer, VkDeviceMemory& memory);
 
@@ -173,6 +196,10 @@ private:
 	void createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties, VkBuffer& buffer, VkDeviceMemory& memory);
 
 	void copyBuffer(VkBuffer& srcBuffer, VkBuffer& dstBuffer, VkDeviceSize size);
+
+	VkCommandBuffer beginSingleTimeCommand();
+
+	void endSingleTimeCommand(VkCommandBuffer& commandBuffer);
 
 	void initWindows();
 
@@ -251,6 +278,12 @@ private:
 	// ubo缓存，每一个交换链一个
 	std::vector<VkBuffer> m_uboBuffers;
 	std::vector<VkDeviceMemory> m_uboBufferMemories;
+
+	// 图片纹理
+	VkImage m_textureImage;
+	VkImageView m_textureImageView;
+	VkDeviceMemory m_textureImageMemory;
+	VkSampler m_textureSampler;
 
 	std::vector<const char*> m_validationLayers{ "VK_LAYER_KHRONOS_validation" };
 	std::vector<const char*> m_deviceExtentions{ VK_KHR_SWAPCHAIN_EXTENSION_NAME };
