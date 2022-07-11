@@ -5,7 +5,7 @@
         "commandLine": "",
         "environment": [
         ],
-        "executable": "E:\\LearnVulkan\\Projects\\LearnVK\\out\\build\\x64-debug\\LearnVK.exe",
+        "executable": "E:\\LearnVulkan\\Projects\\LearnVK\\build\\x64-debug\\LearnVK.exe",
         "inject": false,
         "numQueuedFrames": 0,
         "options": {
