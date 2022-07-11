@@ -7,7 +7,7 @@
 #define GLM_FORCE_RADIANS
 #define GLM_FORCE_DEPTH_ZERO_TO_ONE
 #define STB_IMAGE_IMPLEMENTATION
-#define PRINT_EXTENTION_INFO
+//#define PRINT_EXTENTION_INFO
 
 #include <vulkan/vulkan.h>
 #include <GLFW/glfw3.h>
@@ -39,6 +39,7 @@ struct Vertex
 {
 	glm::vec2 position;
 	glm::vec3 color;
+	glm::vec2 texCoord;
 
 	static VkVertexInputBindingDescription getBindDescription() {
 		VkVertexInputBindingDescription bindDescription = {};
@@ -47,8 +48,8 @@ struct Vertex
 		bindDescription.stride = sizeof(Vertex);
 		return bindDescription;
 	}
-	static std::array<VkVertexInputAttributeDescription, 2> getAttributeDescriptions() {
-		std::array<VkVertexInputAttributeDescription, 2> attributeDescription{};
+	static std::array<VkVertexInputAttributeDescription, 3> getAttributeDescriptions() {
+		std::array<VkVertexInputAttributeDescription, 3> attributeDescription{};
 		attributeDescription[0].binding = 0;
 		attributeDescription[0].location = 0;
 		attributeDescription[0].offset = offsetof(Vertex, position);
@@ -57,15 +58,19 @@ struct Vertex
 		attributeDescription[1].location = 1;
 		attributeDescription[1].offset = offsetof(Vertex, color);
 		attributeDescription[1].format = VK_FORMAT_R32G32B32_SFLOAT;
+		attributeDescription[2].binding = 0;
+		attributeDescription[2].location = 2;
+		attributeDescription[2].offset = offsetof(Vertex, texCoord);
+		attributeDescription[2].format = VK_FORMAT_R32G32B32A32_SFLOAT;
 		return attributeDescription;
 	}
 };
 
 const std::vector<Vertex> g_vertices = {
-	{{-0.5f, -0.5f}, {1.0f, 0.0f, 0.0f}},
-	{{0.5f, -0.5f}, {0.0f, 1.0f, 0.0f}},
-	{{0.5f, 0.5f}, {0.0f, 0.0f, 1.0f}},
-	{{-0.5f, 0.5f}, {1.0f, 1.0f, 1.0f}}
+	{{-0.5f, -0.5f}, {1.0f, 0.0f, 0.0f}, {1.0f, 0.0f}},
+	{{0.5f, -0.5f}, {0.0f, 1.0f, 0.0f}, {0.0f, 0.0f}},
+	{{0.5f, 0.5f}, {0.0f, 0.0f, 1.0f}, {0.0f, 1.0f}},
+	{{-0.5f, 0.5f}, {1.0f, 1.0f, 1.0f}, {1.0f, 1.0f}}
 };
 
 const std::vector<uint16_t> g_indices = {

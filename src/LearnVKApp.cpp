@@ -345,17 +345,26 @@ void LearnVKApp::createRenderPass() {
 }
 
 void LearnVKApp::createDescriptorSetLayout() {
-	VkDescriptorSetLayoutBinding layoutBindingInfo = {};
-	layoutBindingInfo.binding = 0;
-	layoutBindingInfo.descriptorCount = 1;
-	layoutBindingInfo.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-	layoutBindingInfo.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
-	layoutBindingInfo.pImmutableSamplers = nullptr;
+	VkDescriptorSetLayoutBinding uniformBindingInfo = {};	
+	uniformBindingInfo.binding = 0;
+	uniformBindingInfo.descriptorCount = 1;
+	uniformBindingInfo.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+	uniformBindingInfo.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+	uniformBindingInfo.pImmutableSamplers = nullptr;
+
+	VkDescriptorSetLayoutBinding samplerBindingInfo = {};	// 采样器
+	samplerBindingInfo.binding = 1;
+	samplerBindingInfo.descriptorCount = 1;
+	samplerBindingInfo.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+	samplerBindingInfo.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+	samplerBindingInfo.pImmutableSamplers = nullptr;
+
+	VkDescriptorSetLayoutBinding layoutBindings[2] = {uniformBindingInfo, samplerBindingInfo};
 
 	VkDescriptorSetLayoutCreateInfo createInfo = {};
 	createInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-	createInfo.bindingCount = 1;
-	createInfo.pBindings = &layoutBindingInfo;
+	createInfo.bindingCount = 2;
+	createInfo.pBindings = layoutBindings;
 	VkResult res = vkCreateDescriptorSetLayout(m_device, &createInfo, nullptr, &m_descriptorSetLayout);
 	if (res != VK_SUCCESS) {
 		throw std::runtime_error("failed to create descriptor set layout!");
@@ -557,7 +566,7 @@ void LearnVKApp::createCommandPool() {
 
 void LearnVKApp::createTextureImage() {
 	int texWidth, texHeight, texChannels;
-	stbi_uc* pixels = stbi_load((TEXTURE_PATH + "linsei.png").c_str(), &texWidth, &texHeight,
+	stbi_uc* pixels = stbi_load((TEXTURE_PATH + "avatar.png").c_str(), &texWidth, &texHeight,
 		&texChannels, STBI_rgb_alpha);
 	if (!pixels) {
 		throw std::runtime_error("failed to load textures!");
@@ -791,16 +800,21 @@ void LearnVKApp::createUniformBuffers() {
 }
 
 void LearnVKApp::createDescriptorPool() {
-	VkDescriptorPoolSize poolSize = {};
+	VkDescriptorPoolSize uniformPoolSize = {};	
 	uint32_t imageCount = static_cast<uint32_t>(m_swapChainImages.size());
-	poolSize.descriptorCount = imageCount;
-	poolSize.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+	uniformPoolSize.descriptorCount = imageCount;
+	uniformPoolSize.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
 
+	VkDescriptorPoolSize samplerPoolSize = {};
+	samplerPoolSize.descriptorCount = imageCount;
+	samplerPoolSize.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+
+	VkDescriptorPoolSize poolSizes[2] = { uniformPoolSize, samplerPoolSize};
 
 	VkDescriptorPoolCreateInfo createInfo = {};
 	createInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-	createInfo.poolSizeCount = 1;
-	createInfo.pPoolSizes = &poolSize;
+	createInfo.poolSizeCount = 2;
+	createInfo.pPoolSizes = poolSizes;
 	createInfo.maxSets = imageCount;
 
 	VkResult res = vkCreateDescriptorPool(m_device, &createInfo, nullptr, &m_descriptorPool);
@@ -825,22 +839,37 @@ void LearnVKApp::createDescriptorSets() {
 	}
 
 	for (int i = 0; i < imageCount; i++) {
-		VkDescriptorBufferInfo bufferInfo = {};
+		VkDescriptorBufferInfo bufferInfo = {};		// Uniform Object Buffer
 		bufferInfo.buffer = m_uboBuffers[i];
 		bufferInfo.range = sizeof(UniformBufferObject);
 		bufferInfo.offset = 0;
 
-		VkWriteDescriptorSet descWrite = {};
-		descWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-		descWrite.dstSet = m_descriptorSets[i];
-		descWrite.dstBinding = 0;
-		descWrite.dstArrayElement = 0;
-		descWrite.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-		descWrite.descriptorCount = 1;
-		descWrite.pBufferInfo = &bufferInfo;
-		descWrite.pImageInfo = nullptr;			//指定引用的图像
-		descWrite.pTexelBufferView = nullptr;	// 指定缓冲
-		vkUpdateDescriptorSets(m_device, 1, &descWrite, 0, nullptr);
+		VkDescriptorImageInfo imageInfo = {};		// image sampler
+		imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+		imageInfo.imageView = m_textureImageView;
+		imageInfo.sampler = m_textureSampler;
+
+		
+		VkWriteDescriptorSet bufferWrite = {};
+		bufferWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+		bufferWrite.dstSet = m_descriptorSets[i];
+		bufferWrite.dstBinding = 0;
+		bufferWrite.dstArrayElement = 0;
+		bufferWrite.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+		bufferWrite.descriptorCount = 1;
+		bufferWrite.pBufferInfo = &bufferInfo;		// 指定缓冲
+
+		VkWriteDescriptorSet imageWrite = {};
+		imageWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+		imageWrite.dstSet = m_descriptorSets[i];
+		imageWrite.dstBinding = 1;
+		imageWrite.dstArrayElement = 0;
+		imageWrite.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+		imageWrite.descriptorCount = 1;
+		imageWrite.pImageInfo = &imageInfo;		//指定引用的图像
+		
+		VkWriteDescriptorSet descWrites[2] = {bufferWrite, imageWrite};
+		vkUpdateDescriptorSets(m_device, 2, descWrites, 0, nullptr);
 	}
 }
 
@@ -1099,7 +1128,7 @@ void LearnVKApp::updateUniformBuffers(uint32_t imageIndex) {
 	float time = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
 	UniformBufferObject ubo = {};
 	ubo.model = glm::rotate(glm::mat4(1.0f), time * glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f)); // 以Z轴为轴每秒旋转90°
-	ubo.view = glm::lookAt(glm::vec3(2.0f, 2.0f, 2.0f), glm::vec3(0, 0, 0), glm::vec3(0.0f, 0.0f, 1.0f));	// 从(2,2,2)看向(0,0,0)
+	ubo.view = glm::lookAt(glm::vec3(2.0f, 2.0f, 2.0f), glm::vec3(0), glm::vec3(0.0f, 0.0f, 1.0f));	// 从(2,2,2)看向(0,0,0)
 	ubo.proj = glm::perspective(glm::radians(45.0f), 
 		m_swapChainImageExtent.width / static_cast<float>(m_swapChainImageExtent.height), 0.1f, 10.0f);	// 投影矩阵，fov:45 平截头体近0.1远10
 	ubo.proj[1][1] *= -1; // 因为OpenGL与Vulkan的y轴正方向是反的，因此需要将y轴缩放系数取相反数
