@@ -5,7 +5,8 @@
 *.slo
 *.lo
 *.o
-# *.obj
+*.obj
+!resource/**obj
 
 # Precompiled Headers
 *.gch
@@ -36,4 +37,5 @@
 /out
 /.vs
 /.cache
+/.VSCodeCounter
 
