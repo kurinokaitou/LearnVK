@@ -877,7 +877,7 @@ void LearnVKApp::loadModel(const std::string& modelName) {
                           modelPath.c_str())) {
         throw std::runtime_error(err);
     }
-    std::unordered_map<Vertex, uint32_t> uniqueVertexIndexMap{};
+    std::unordered_map<Vertex, uint32_t> uniqueVertexIndexMap{}; // 顶点去重
     for (const auto& shape : shapes) {
         for (const auto& index : shape.mesh.indices) {
             Vertex vertex;
