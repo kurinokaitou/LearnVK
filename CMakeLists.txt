@@ -12,12 +12,12 @@ project ("LearnVK")
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # Vulkan SDK设置
-if(NOT DEFINED ENV{VK_SDK_PATH})
-	message(FATAL_ERROR "VK_SDK_PATH not defined!")
+if(NOT DEFINED ENV{VULKAN_SDK})
+	message(FATAL_ERROR "VULKAN_SDK not defined!")
 endif()
-set(VK_SDK_PATH $ENV{VK_SDK_PATH})
-set(VK_SDK_INCLUDE ${VK_SDK_PATH}/Include)
-set(VK_SDK_LIB ${VK_SDK_PATH}/Lib/vulkan-1.lib)
+set(VULKAN_SDK $ENV{VULKAN_SDK})
+set(VK_SDK_INCLUDE ${VULKAN_SDK}/Include)
+set(VK_SDK_LIB ${VULKAN_SDK}/Lib/vulkan-1.lib)
 
 # vcpkg安装的glm和glfw3引入包
 find_package(glm CONFIG REQUIRED)
