@@ -1,6 +1,8 @@
 ﻿// LearnVK.cpp: 定义应用程序的入口点。
 //
 #include "LearnVKApp.h"
+#include "vulkan/vulkan_core.h"
+#include <array>
 
 bool LearnVKApp::s_framebufferResized = false;
 void LearnVKApp::run() { // 开始运行程序
@@ -29,9 +31,9 @@ void LearnVKApp::initVK() { // 初始化Vulkan的设备
   createRenderPass();
   createDescriptorSetLayout();
   createGraphicsPipeline();
+  createDepthResources();
   createFrameBuffers();
   createCommandPool();
-  createDepthResources();
   createTextureImage();
   createTextureImageView();
   createTextureSampler();
@@ -299,11 +301,13 @@ void LearnVKApp::createImageViews() {
   m_swapChainImageViews.resize(m_swapChainImages.size());
   for (int i = 0; i < m_swapChainImages.size(); i++) {
     m_swapChainImageViews[i] =
-        createImageView(m_swapChainImages[i], m_swapChainImageFormat);
+        createImageView(m_swapChainImages[i], m_swapChainImageFormat,
+                        VK_IMAGE_ASPECT_COLOR_BIT);
   }
 }
 
-VkImageView LearnVKApp::createImageView(VkImage image, VkFormat format) {
+VkImageView LearnVKApp::createImageView(VkImage image, VkFormat format,
+                                        VkImageAspectFlags aspectMask) {
   VkImageViewCreateInfo createInfo = {};
   VkImageView imageView;
   createInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
@@ -316,7 +320,7 @@ VkImageView LearnVKApp::createImageView(VkImage image, VkFormat format) {
   createInfo.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
   createInfo.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
   // 指定哪部分图片资源可以被访问,这里被设置为渲染目标
-  createInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+  createInfo.subresourceRange.aspectMask = aspectMask;
   createInfo.subresourceRange.baseMipLevel = 0;
   createInfo.subresourceRange.levelCount = 1;
   createInfo.subresourceRange.baseArrayLayer = 0;
@@ -345,12 +349,31 @@ void LearnVKApp::createRenderPass() {
   colorAttachment.finalLayout =
       VK_IMAGE_LAYOUT_PRESENT_SRC_KHR; // 在内存中的分布方式为用作呈现方式
 
+  VkAttachmentDescription depthAttachment = {};
+  depthAttachment.format = findDepthFormat();
+  depthAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
+  //深度缓冲的存取策略
+  depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+  depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+  //模板缓冲的存取策略
+  depthAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+  depthAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+
+  depthAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+  depthAttachment.finalLayout =
+      VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+
   // 附着引用
   VkAttachmentReference colorAttachReference = {};
   colorAttachReference.attachment =
       0; // 表示attachment在数组中的引用索引，也是shader中片元最终输出时layout
          // (location = 0)的索引
   colorAttachReference.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+  VkAttachmentReference depthAttachReference = {};
+  depthAttachReference.attachment = 1;
+  depthAttachReference.layout =
+      VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+
   // 渲染流程可能包含多个子流程，其依赖于上一流程处理后的帧缓冲内容
   VkSubpassDescription subpass = {};
   subpass.pipelineBindPoint =
@@ -358,6 +381,7 @@ void LearnVKApp::createRenderPass() {
   subpass.colorAttachmentCount = 1;
   subpass.pColorAttachments =
       &colorAttachReference; // 颜色帧缓冲附着会被在frag中使用作为输出
+  subpass.pDepthStencilAttachment = &depthAttachReference;
 
   // * 子流程依赖
   VkSubpassDependency dependency = {};
@@ -372,10 +396,11 @@ void LearnVKApp::createRenderPass() {
                              VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
 
   // 渲染流程
+  VkAttachmentDescription attachments[2] = {colorAttachment, depthAttachment};
   VkRenderPassCreateInfo renderPassCreateInfo = {};
   renderPassCreateInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
-  renderPassCreateInfo.attachmentCount = 1;
-  renderPassCreateInfo.pAttachments = &colorAttachment;
+  renderPassCreateInfo.attachmentCount = 2;
+  renderPassCreateInfo.pAttachments = attachments;
   renderPassCreateInfo.subpassCount = 1;
   renderPassCreateInfo.pSubpasses = &subpass;
   renderPassCreateInfo.dependencyCount = 1;
@@ -508,7 +533,15 @@ void LearnVKApp::createGraphicsPipeline() {
   multisampleCreateInfo.alphaToOneEnable = VK_FALSE;
 
   // 深度与模板测试
-  // VkPipelineDepthStencilStateCreateInfo depthCreateInfo = {};
+  VkPipelineDepthStencilStateCreateInfo depthStencilState = {};
+  depthStencilState.sType =
+      VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+  depthStencilState.depthTestEnable = VK_TRUE;
+  depthStencilState.depthWriteEnable = VK_TRUE;
+  depthStencilState.depthCompareOp = VK_COMPARE_OP_LESS; // 深度值小的留下
+  depthStencilState.depthBoundsTestEnable =
+      VK_FALSE; // 指定深度范围，这里不启用
+  depthStencilState.stencilTestEnable = VK_FALSE;
 
   // 颜色混合
   VkPipelineColorBlendStateCreateInfo colorBlendCreateInfo =
@@ -574,8 +607,9 @@ void LearnVKApp::createGraphicsPipeline() {
   pipelineCreateInfo.pRasterizationState =
       &rasterizationCreateInfo; // 指定光栅器设置
   pipelineCreateInfo.pMultisampleState =
-      &multisampleCreateInfo;                      // 指定多重采样设置
-  pipelineCreateInfo.pDepthStencilState = nullptr; // 指定深度模板缓冲
+      &multisampleCreateInfo; // 指定多重采样设置
+  pipelineCreateInfo.pDepthStencilState =
+      &depthStencilState; // 指定深度模板缓冲
   pipelineCreateInfo.pColorBlendState = &colorBlendCreateInfo;
   pipelineCreateInfo.pDynamicState = &dynamicStateCreateInfo;
   pipelineCreateInfo.layout = m_pipelineLayout;
@@ -602,11 +636,11 @@ void LearnVKApp::createGraphicsPipeline() {
 void LearnVKApp::createFrameBuffers() {
   m_swapChainFrameBuffers.resize(m_swapChainImageViews.size());
   for (int i = 0; i < m_swapChainImages.size(); i++) {
-    VkImageView imageViews[] = {m_swapChainImageViews[i]};
+    VkImageView imageViews[] = {m_swapChainImageViews[i], m_depthImageView};
     VkFramebufferCreateInfo createInfo = {};
     createInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
     createInfo.renderPass = m_renderPass;
-    createInfo.attachmentCount = 1;
+    createInfo.attachmentCount = 2;
     createInfo.pAttachments = imageViews;
     createInfo.width = m_swapChainImageExtent.width;
     createInfo.height = m_swapChainImageExtent.height;
@@ -632,7 +666,41 @@ void LearnVKApp::createCommandPool() {
   }
 }
 
-void LearnVKApp::createDepthResources() {}
+void LearnVKApp::createDepthResources() {
+  VkFormat depthFormat = findDepthFormat();
+  createImage(
+      m_swapChainImageExtent.width, m_swapChainImageExtent.height, depthFormat,
+      VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
+      VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, m_depthImage, m_depthImageMemory);
+  m_depthImageView =
+      createImageView(m_depthImage, depthFormat, VK_IMAGE_ASPECT_DEPTH_BIT);
+}
+
+VkFormat LearnVKApp::findDepthFormat() {
+  return findSupportedFormat(
+      {VK_FORMAT_D32_SFLOAT, VK_FORMAT_D32_SFLOAT_S8_UINT,
+       VK_FORMAT_D24_UNORM_S8_UINT},
+      VK_IMAGE_TILING_OPTIMAL, VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT);
+}
+
+VkFormat LearnVKApp::findSupportedFormat(const std::vector<VkFormat> &formats,
+                                         VkImageTiling tiling,
+                                         VkFormatFeatureFlags features) {
+  for (VkFormat format : formats) {
+    VkFormatProperties props;
+    vkGetPhysicalDeviceFormatProperties(m_physicalDevice, format, &props);
+
+    if (tiling == VK_IMAGE_TILING_LINEAR &&
+        (props.linearTilingFeatures & features) == features) {
+      return format;
+    } else if (tiling == VK_IMAGE_TILING_OPTIMAL &&
+               (props.optimalTilingFeatures & features) == features) {
+      return format;
+    }
+  }
+
+  throw std::runtime_error("failed to find supported format!");
+}
 
 void LearnVKApp::createTextureImage() {
   int texWidth, texHeight, texChannels;
@@ -778,7 +846,8 @@ void LearnVKApp::copyBufferToImage(VkBuffer buffer, VkImage image,
 }
 
 void LearnVKApp::createTextureImageView() {
-  m_textureImageView = createImageView(m_textureImage, VK_FORMAT_R8G8B8A8_SRGB);
+  m_textureImageView = createImageView(m_textureImage, VK_FORMAT_R8G8B8A8_SRGB,
+                                       VK_IMAGE_ASPECT_COLOR_BIT);
 }
 
 void LearnVKApp::createTextureSampler() {
@@ -1019,9 +1088,11 @@ void LearnVKApp::recordCommandBuffers(VkCommandBuffer commandBuffer,
   renderPassBeginInfo.framebuffer = m_swapChainFrameBuffers[imageIndex];
   renderPassBeginInfo.renderArea.extent = m_swapChainImageExtent;
   renderPassBeginInfo.renderArea.offset = {0, 0};
-  VkClearValue clearValue = {0.01f, 0.01f, 0.01f, 1.0f};
-  renderPassBeginInfo.clearValueCount = 1;
-  renderPassBeginInfo.pClearValues = &clearValue;
+  std::array<VkClearValue, 2> clearValues;
+  clearValues[0].color = {0.01f, 0.01f, 0.01f, 1.0f};
+  clearValues[1].depthStencil = {1.0f, 0};
+  renderPassBeginInfo.clearValueCount = 2;
+  renderPassBeginInfo.pClearValues = clearValues.data();
   vkCmdBeginRenderPass(commandBuffer, &renderPassBeginInfo,
                        VK_SUBPASS_CONTENTS_INLINE);
   vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
@@ -1343,6 +1414,10 @@ void LearnVKApp::drawFrame() {
 }
 
 void LearnVKApp::cleanupSwapChain() {
+  vkDestroyImageView(m_device, m_depthImageView, nullptr);
+  vkDestroyImage(m_device, m_depthImage, nullptr);
+  vkFreeMemory(m_device, m_depthImageMemory, nullptr);
+
   for (auto &frameBuffer : m_swapChainFrameBuffers) {
     vkDestroyFramebuffer(m_device, frameBuffer, nullptr);
   }
@@ -1373,6 +1448,7 @@ void LearnVKApp::recreateSwapChain() {
   createImageViews();
   createRenderPass();
   createGraphicsPipeline();
+  createDepthResources();
   createFrameBuffers();
   createCommandBuffers();
 }
