@@ -33,6 +33,7 @@
 
 # directories
 /build
+/out
 /.vs
 /.cache
 
