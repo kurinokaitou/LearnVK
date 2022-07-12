@@ -185,13 +185,15 @@ private:
 
     void createTextureImage(const std::string& textureName);
 
-    void createImage(uint32_t width, uint32_t height, VkFormat format,
+    void createImage(uint32_t width, uint32_t height, uint32_t mipLevels, VkFormat format,
                      VkImageTiling tiling, VkImageUsageFlags usags,
                      VkMemoryPropertyFlags properties, VkImage& image,
                      VkDeviceMemory& memory);
 
+    void generateMipmaps(VkImage image, VkFormat imageFormat, uint32_t texWidth, uint32_t texHeight, uint32_t mipLevels);
+
     void transitionImageLayout(VkImage image, VkFormat format,
-                               VkImageLayout oldLayout, VkImageLayout newLayout);
+                               VkImageLayout oldLayout, VkImageLayout newLayout, uint32_t mipsLevels);
 
     void copyBufferToImage(VkBuffer buffer, VkImage image, uint32_t width,
                            uint32_t height);
@@ -201,7 +203,7 @@ private:
     void createTextureSampler();
 
     VkImageView createImageView(VkImage image, VkFormat format,
-                                VkImageAspectFlags aspectMask);
+                                VkImageAspectFlags aspectMask, uint32_t mipLevels);
 
     void loadModel(const std::string& modelName);
 
@@ -319,6 +321,7 @@ private:
     VkImageView m_textureImageView;
     VkDeviceMemory m_textureImageMemory;
     VkSampler m_textureSampler;
+    uint32_t m_mipLevels;
 
     // 深度缓冲
     VkImage m_depthImage;

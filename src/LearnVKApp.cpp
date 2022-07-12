@@ -2,6 +2,8 @@
 //
 #include "LearnVKApp.h"
 #include "vulkan/vulkan_core.h"
+#include <cmath>
+#include <stdexcept>
 #include <unordered_map>
 
 bool LearnVKApp::s_framebufferResized = false;
@@ -300,12 +302,12 @@ void LearnVKApp::createImageViews() {
     for (int i = 0; i < m_swapChainImages.size(); i++) {
         m_swapChainImageViews[i] =
             createImageView(m_swapChainImages[i], m_swapChainImageFormat,
-                            VK_IMAGE_ASPECT_COLOR_BIT);
+                            VK_IMAGE_ASPECT_COLOR_BIT, 1);
     }
 }
 
 VkImageView LearnVKApp::createImageView(VkImage image, VkFormat format,
-                                        VkImageAspectFlags aspectMask) {
+                                        VkImageAspectFlags aspectMask, uint32_t mipLevels) {
     VkImageViewCreateInfo createInfo = {};
     VkImageView imageView;
     createInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
@@ -320,7 +322,7 @@ VkImageView LearnVKApp::createImageView(VkImage image, VkFormat format,
     // 指定哪部分图片资源可以被访问,这里被设置为渲染目标
     createInfo.subresourceRange.aspectMask = aspectMask;
     createInfo.subresourceRange.baseMipLevel = 0;
-    createInfo.subresourceRange.levelCount = 1;
+    createInfo.subresourceRange.levelCount = mipLevels;
     createInfo.subresourceRange.baseArrayLayer = 0;
     createInfo.subresourceRange.layerCount = 1;
     // 显示创建 ImageView
@@ -665,11 +667,11 @@ void LearnVKApp::createCommandPool() {
 void LearnVKApp::createDepthResources() {
     VkFormat depthFormat = findDepthFormat();
     createImage(
-        m_swapChainImageExtent.width, m_swapChainImageExtent.height, depthFormat,
+        m_swapChainImageExtent.width, m_swapChainImageExtent.height, 1, depthFormat,
         VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, m_depthImage, m_depthImageMemory);
     m_depthImageView =
-        createImageView(m_depthImage, depthFormat, VK_IMAGE_ASPECT_DEPTH_BIT);
+        createImageView(m_depthImage, depthFormat, VK_IMAGE_ASPECT_DEPTH_BIT, 1);
 }
 
 VkFormat LearnVKApp::findDepthFormat() {
@@ -704,6 +706,7 @@ void LearnVKApp::createTextureImage(const std::string& textureName) {
         throw std::runtime_error(
             "failed to load textures! searching:" + TEXTURE_PATH + textureName);
     }
+    m_mipLevels = static_cast<uint32_t>(std::floor(std::log2(std::max(texWidth, texHeight))));
     VkDeviceSize imageSize = texWidth * texHeight * 4;
     VkBuffer stagingBuffer;
     VkDeviceMemory stagingBufferMemory;
@@ -716,27 +719,29 @@ void LearnVKApp::createTextureImage(const std::string& textureName) {
     vkUnmapMemory(m_device, stagingBufferMemory);
     stbi_image_free(pixels);
 
-    createImage(static_cast<uint32_t>(texWidth), static_cast<uint32_t>(texHeight),
+    createImage(static_cast<uint32_t>(texWidth), static_cast<uint32_t>(texHeight), m_mipLevels,
                 VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_TILING_OPTIMAL,
-                VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+                VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
                 VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, m_textureImage,
                 m_textureImageMemory);
     transitionImageLayout(
         m_textureImage, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_LAYOUT_UNDEFINED,
-        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL); // oldlayout
-                                               // 在创建时我们指定为了UNDEFINED
+        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, m_mipLevels); // oldlayout
+                                                            // 在创建时我们指定为了UNDEFINED
     copyBufferToImage(stagingBuffer, m_textureImage,
                       static_cast<uint32_t>(texWidth),
                       static_cast<uint32_t>(texHeight));
-    transitionImageLayout(
-        m_textureImage, VK_FORMAT_R8G8B8A8_SRGB,
-        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL); // 再次将图片layout转换为着色器可以使用
+    // transitionImageLayout(
+    //     m_textureImage, VK_FORMAT_R8G8B8A8_SRGB,
+    //     VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+    //     VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, m_mipLevels); // 再次将图片layout转换为着色器可以使用
+    generateMipmaps(m_textureImage, VK_FORMAT_R8G8B8A8_SRGB, texWidth, texHeight, m_mipLevels); // 创建mipmaps最后会将布局转为SHADRE_READ_ONLY_OPTIMAL
+
     vkDestroyBuffer(m_device, stagingBuffer, nullptr);
     vkFreeMemory(m_device, stagingBufferMemory, nullptr);
 }
 
-void LearnVKApp::createImage(uint32_t width, uint32_t height, VkFormat format,
+void LearnVKApp::createImage(uint32_t width, uint32_t height, uint32_t mipLevels, VkFormat format,
                              VkImageTiling tiling, VkImageUsageFlags usage,
                              VkMemoryPropertyFlags properties, VkImage& image,
                              VkDeviceMemory& memory) {
@@ -746,7 +751,7 @@ void LearnVKApp::createImage(uint32_t width, uint32_t height, VkFormat format,
     imageInfo.extent.width = width;
     imageInfo.extent.height = height;
     imageInfo.extent.depth = 1;
-    imageInfo.mipLevels = 1;
+    imageInfo.mipLevels = mipLevels;
     imageInfo.arrayLayers = 1;
     imageInfo.format = format;
     imageInfo.tiling = tiling;
@@ -772,9 +777,91 @@ void LearnVKApp::createImage(uint32_t width, uint32_t height, VkFormat format,
     vkBindImageMemory(m_device, image, memory, 0);
 }
 
+void LearnVKApp::generateMipmaps(VkImage image, VkFormat imageFormat, uint32_t texWidth, uint32_t texHeight, uint32_t mipLevels) {
+    VkFormatProperties formatProperties;
+    vkGetPhysicalDeviceFormatProperties(m_physicalDevice, imageFormat, &formatProperties);
+    if (!(formatProperties.optimalTilingFeatures & VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT)) {
+        throw std::runtime_error("texture format linear bilt not support!");
+    }
+    VkImageMemoryBarrier imageBarrier = {};
+    imageBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    imageBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    imageBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    imageBarrier.image = image;
+    imageBarrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    imageBarrier.subresourceRange.baseArrayLayer = 0;
+    imageBarrier.subresourceRange.layerCount = 1;
+    imageBarrier.subresourceRange.levelCount = 1;
+
+    VkCommandBuffer commandBuffer = beginSingleTimeCommand();
+
+    int mipWidth = static_cast<int>(texWidth);
+    int mipHeight = static_cast<int>(texHeight);
+    for (int i = 1; i < mipLevels; i++) {
+        imageBarrier.subresourceRange.baseMipLevel = i - 1;
+        imageBarrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+        imageBarrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+        imageBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        imageBarrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+        vkCmdPipelineBarrier(commandBuffer, // 第一个屏障将单张mipmap布局转换到最佳转换模式
+                             VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0,
+                             0, nullptr,
+                             0, nullptr,
+                             1, &imageBarrier);
+
+        VkImageBlit blit = {};
+        blit.srcOffsets[0] = {0, 0, 0};
+        blit.srcOffsets[1] = {mipWidth, mipHeight, 1};
+        blit.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        blit.srcSubresource.mipLevel = i - 1;
+        blit.srcSubresource.baseArrayLayer = 0;
+        blit.srcSubresource.layerCount = 1;
+        blit.dstOffsets[0] = {0, 0, 0};
+        blit.dstOffsets[1] = {mipWidth > 1 ? mipWidth / 2 : 1, mipHeight > 1 ? mipHeight / 2 : 1, 1};
+        blit.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        blit.dstSubresource.mipLevel = i;
+        blit.dstSubresource.baseArrayLayer = 0;
+        blit.dstSubresource.layerCount = 1;
+
+        vkCmdBlitImage(commandBuffer,
+                       image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                       image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                       1, &blit,
+                       VK_FILTER_LINEAR);
+
+        imageBarrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+        imageBarrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL; // 只有前miplevels-1个会被blit执行，将image最后一个
+        imageBarrier.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+        imageBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+
+        vkCmdPipelineBarrier(commandBuffer, // 第二个屏障将其转换为shader read最优的布局
+                             VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0,
+                             0, nullptr,
+                             0, nullptr,
+                             1, &imageBarrier);
+
+        if (mipWidth > 1) mipWidth /= 2;
+        if (mipHeight > 1) mipHeight /= 2;
+    }
+
+    imageBarrier.subresourceRange.baseMipLevel = mipLevels - 1;
+    imageBarrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL; // 最高级的mipmap的layout已然还是上次transition的结果
+    imageBarrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    imageBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    imageBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+
+    vkCmdPipelineBarrier(commandBuffer,
+                         VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0,
+                         0, nullptr,
+                         0, nullptr,
+                         1, &imageBarrier);
+
+    endSingleTimeCommand(commandBuffer);
+}
+
 void LearnVKApp::transitionImageLayout(VkImage image, VkFormat format,
                                        VkImageLayout oldLayout,
-                                       VkImageLayout newLayout) {
+                                       VkImageLayout newLayout, uint32_t mipsLevels) {
     VkCommandBuffer commandBuffer = beginSingleTimeCommand();
     VkImageMemoryBarrier imageBarrier = {};
     imageBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
@@ -788,7 +875,7 @@ void LearnVKApp::transitionImageLayout(VkImage image, VkFormat format,
     imageBarrier.subresourceRange.baseArrayLayer = 0;
     imageBarrier.subresourceRange.layerCount = 1;
     imageBarrier.subresourceRange.baseMipLevel = 0;
-    imageBarrier.subresourceRange.levelCount = 1;
+    imageBarrier.subresourceRange.levelCount = mipsLevels;
 
     VkPipelineStageFlags sourceStage;      // 生产者阶段，在屏障前
     VkPipelineStageFlags destinationStage; // 消费者阶段，在屏障后
@@ -837,10 +924,12 @@ void LearnVKApp::copyBufferToImage(VkBuffer buffer, VkImage image,
 
 void LearnVKApp::createTextureImageView() {
     m_textureImageView = createImageView(m_textureImage, VK_FORMAT_R8G8B8A8_SRGB,
-                                         VK_IMAGE_ASPECT_COLOR_BIT);
+                                         VK_IMAGE_ASPECT_COLOR_BIT, m_mipLevels);
 }
 
 void LearnVKApp::createTextureSampler() {
+    VkPhysicalDeviceProperties properties{};
+    vkGetPhysicalDeviceProperties(m_physicalDevice, &properties);
     VkSamplerCreateInfo samplerInfo = {};
     samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
     samplerInfo.magFilter = VK_FILTER_LINEAR; //放大时采用线性插值方法
@@ -849,16 +938,15 @@ void LearnVKApp::createTextureSampler() {
     samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
     samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
     samplerInfo.anisotropyEnable = VK_TRUE;
-    samplerInfo.maxAnisotropy = 16;
+    samplerInfo.maxAnisotropy = properties.limits.maxSamplerAnisotropy;
     samplerInfo.borderColor = VK_BORDER_COLOR_INT_OPAQUE_BLACK;
     samplerInfo.unnormalizedCoordinates = VK_FALSE; // 坐标系统[0, 1)
-    samplerInfo.compareEnable =
-        VK_FALSE; // 采样时与一个值比较，结果作用于过滤操作
+    samplerInfo.compareEnable = VK_FALSE;           // 采样时与一个值比较，结果作用于过滤操作
     samplerInfo.compareOp = VK_COMPARE_OP_ALWAYS;
     samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
     samplerInfo.mipLodBias = 0.0f;
     samplerInfo.minLod = 0.0f;
-    samplerInfo.maxLod = 0.0f;
+    samplerInfo.maxLod = static_cast<float>(m_mipLevels);
     VkResult res =
         vkCreateSampler(m_device, &samplerInfo, nullptr, &m_textureSampler);
     if (res != VK_SUCCESS) {
