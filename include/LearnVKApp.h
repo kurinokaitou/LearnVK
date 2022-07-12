@@ -3,6 +3,7 @@
 
 #ifndef LEARN_VK_APP
 #define LEARN_VK_APP
+#include <stdint.h>
 #define GLFW_INCLUDE_VULKAN
 #define GLM_FORCE_RADIANS
 #define GLM_FORCE_DEPTH_ZERO_TO_ONE
@@ -175,6 +176,8 @@ private:
 
     void createDepthResources();
 
+    void createColorResources();
+
     VkFormat findDepthFormat();
 
     VkFormat findSupportedFormat(const std::vector<VkFormat>& formats,
@@ -185,7 +188,7 @@ private:
 
     void createTextureImage(const std::string& textureName);
 
-    void createImage(uint32_t width, uint32_t height, uint32_t mipLevels, VkFormat format,
+    void createImage(uint32_t width, uint32_t height, uint32_t mipLevels, VkSampleCountFlagBits numSamples, VkFormat format,
                      VkImageTiling tiling, VkImageUsageFlags usags,
                      VkMemoryPropertyFlags properties, VkImage& image,
                      VkDeviceMemory& memory);
@@ -254,6 +257,8 @@ private:
 
     void clear();
 
+    VkSampleCountFlagBits getMaxUsableSampleCount();
+
     GLFWwindow* m_window = nullptr;
 
     static bool s_framebufferResized;
@@ -267,6 +272,7 @@ private:
 
     // 支持一台物理设备
     VkPhysicalDevice m_physicalDevice = VK_NULL_HANDLE;
+    VkSampleCountFlagBits m_msaaSampleCount = VK_SAMPLE_COUNT_1_BIT;
 
     // 一台逻辑设备
     VkDevice m_device = VK_NULL_HANDLE;
@@ -327,6 +333,11 @@ private:
     VkImage m_depthImage;
     VkImageView m_depthImageView;
     VkDeviceMemory m_depthImageMemory;
+
+    // 多重采样离屏渲染的缓冲
+    VkImage m_colorImage;
+    VkImageView m_colorImageView;
+    VkDeviceMemory m_colorImageMemory;
 
     std::vector<Vertex> g_vertices;
     std::vector<uint32_t> g_indices;

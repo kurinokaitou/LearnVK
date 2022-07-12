@@ -33,9 +33,10 @@ void LearnVKApp::initVK() { // 初始化Vulkan的设备
     createRenderPass();
     createDescriptorSetLayout();
     createGraphicsPipeline();
+    createCommandPool();
+    createColorResources();
     createDepthResources();
     createFrameBuffers();
-    createCommandPool();
     loadModel("viking_room/viking_room.obj");
     createTextureImage("viking_room/viking_room.png");
     createTextureImageView();
@@ -337,7 +338,7 @@ void LearnVKApp::createRenderPass() {
     // 帧缓冲附着
     VkAttachmentDescription colorAttachment = {};
     colorAttachment.format = m_swapChainImageFormat;
-    colorAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
+    colorAttachment.samples = m_msaaSampleCount;
     // 颜色和深度缓冲的存取策略
     colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
     colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
@@ -346,12 +347,22 @@ void LearnVKApp::createRenderPass() {
     colorAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
 
     colorAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    colorAttachment.finalLayout =
-        VK_IMAGE_LAYOUT_PRESENT_SRC_KHR; // 在内存中的分布方式为用作呈现方式
+    colorAttachment.finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL; // 在内存中的分布方式为用作呈现方式,多重采样中为attachment,不能直接呈现
+
+    // 帧缓冲附着解析多重采样
+    VkAttachmentDescription colorAttachmentResolve = {};
+    colorAttachmentResolve.format = m_swapChainImageFormat;
+    colorAttachmentResolve.samples = VK_SAMPLE_COUNT_1_BIT;
+    colorAttachmentResolve.loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    colorAttachmentResolve.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    colorAttachmentResolve.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    colorAttachmentResolve.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    colorAttachmentResolve.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    colorAttachmentResolve.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR; // 转换为presentKHR
 
     VkAttachmentDescription depthAttachment = {};
     depthAttachment.format = findDepthFormat();
-    depthAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
+    depthAttachment.samples = m_msaaSampleCount;
     //深度缓冲的存取策略
     depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
     depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
@@ -365,40 +376,39 @@ void LearnVKApp::createRenderPass() {
 
     // 附着引用
     VkAttachmentReference colorAttachReference = {};
-    colorAttachReference.attachment =
-        0; // 表示attachment在数组中的引用索引，也是shader中片元最终输出时layout
-           // (location = 0)的索引
+    colorAttachReference.attachment = 0; // 表示attachment在数组中的引用索引，也是shader中片元最终输出时layout(location = 0)的索引
     colorAttachReference.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+
     VkAttachmentReference depthAttachReference = {};
     depthAttachReference.attachment = 1;
-    depthAttachReference.layout =
-        VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+    depthAttachReference.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+    // 引用解析
+    VkAttachmentReference colorAttachResolveRef = {};
+    colorAttachResolveRef.attachment = 2;
+    colorAttachResolveRef.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 
     // 渲染流程可能包含多个子流程，其依赖于上一流程处理后的帧缓冲内容
     VkSubpassDescription subpass = {};
-    subpass.pipelineBindPoint =
-        VK_PIPELINE_BIND_POINT_GRAPHICS; // 这是一个图形渲染的子流程
+    subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS; // 这是一个图形渲染的子流程
     subpass.colorAttachmentCount = 1;
-    subpass.pColorAttachments =
-        &colorAttachReference; // 颜色帧缓冲附着会被在frag中使用作为输出
+    subpass.pColorAttachments = &colorAttachReference;    // 颜色帧缓冲附着会被在frag中使用作为输出
+    subpass.pResolveAttachments = &colorAttachResolveRef; // 指向解析的colorAttachment引用
     subpass.pDepthStencilAttachment = &depthAttachReference;
 
     // * 子流程依赖
     VkSubpassDependency dependency = {};
     dependency.srcSubpass = VK_SUBPASS_EXTERNAL; //隐含的子流程
     dependency.dstSubpass = 0;
-    dependency.srcStageMask =
-        VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT; // 需要等待交换链读取完图像
+    dependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT; // 需要等待交换链读取完图像
     dependency.srcAccessMask = 0;
-    dependency.dstStageMask =
-        VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT; // 为等待颜色附着的输出阶段
+    dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT; // 为等待颜色附着的输出阶段
     dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
 
     // 渲染流程
-    VkAttachmentDescription attachments[2] = {colorAttachment, depthAttachment};
+    VkAttachmentDescription attachments[3] = {colorAttachment, depthAttachment, colorAttachmentResolve};
     VkRenderPassCreateInfo renderPassCreateInfo = {};
     renderPassCreateInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
-    renderPassCreateInfo.attachmentCount = 2;
+    renderPassCreateInfo.attachmentCount = 3;
     renderPassCreateInfo.pAttachments = attachments;
     renderPassCreateInfo.subpassCount = 1;
     renderPassCreateInfo.pSubpasses = &subpass;
@@ -506,16 +516,13 @@ void LearnVKApp::createGraphicsPipeline() {
 
     // 光栅化阶段，除了fill mode外其他光栅化方式也需要GPU特性
     VkPipelineRasterizationStateCreateInfo rasterizationCreateInfo = {};
-    rasterizationCreateInfo.sType =
-        VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
-    rasterizationCreateInfo.depthClampEnable =
-        VK_FALSE; //是否截断片元在远近平面上
+    rasterizationCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+    rasterizationCreateInfo.depthClampEnable = VK_FALSE; //是否截断片元在远近平面上
     rasterizationCreateInfo.rasterizerDiscardEnable = VK_FALSE;
     rasterizationCreateInfo.lineWidth = 1.0f;
-    rasterizationCreateInfo.cullMode = VK_CULL_MODE_NONE; // 剔除背面
-    rasterizationCreateInfo.frontFace =
-        VK_FRONT_FACE_COUNTER_CLOCKWISE;                // 逆时针顶点序为正面
-    rasterizationCreateInfo.depthBiasEnable = VK_FALSE; // 阴影贴图的 alias
+    rasterizationCreateInfo.cullMode = VK_CULL_MODE_NONE;                // 剔除背面
+    rasterizationCreateInfo.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE; // 逆时针顶点序为正面
+    rasterizationCreateInfo.depthBiasEnable = VK_FALSE;                  // 阴影贴图的 alias
     rasterizationCreateInfo.depthBiasConstantFactor = 0.0f;
     rasterizationCreateInfo.depthBiasClamp = 0.0f;
     rasterizationCreateInfo.depthBiasSlopeFactor = 0.0f;
@@ -524,48 +531,41 @@ void LearnVKApp::createGraphicsPipeline() {
     VkPipelineMultisampleStateCreateInfo multisampleCreateInfo = {};
     multisampleCreateInfo.sType =
         VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
-    multisampleCreateInfo.sampleShadingEnable = VK_FALSE;
-    multisampleCreateInfo.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
-    multisampleCreateInfo.minSampleShading = 1.0f;
+    multisampleCreateInfo.sampleShadingEnable = VK_TRUE;
+    multisampleCreateInfo.rasterizationSamples = m_msaaSampleCount;
+    multisampleCreateInfo.minSampleShading = 0.2f;
     multisampleCreateInfo.pSampleMask = nullptr;
     multisampleCreateInfo.alphaToCoverageEnable = VK_FALSE;
     multisampleCreateInfo.alphaToOneEnable = VK_FALSE;
 
     // 深度与模板测试
     VkPipelineDepthStencilStateCreateInfo depthStencilState = {};
-    depthStencilState.sType =
-        VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+    depthStencilState.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
     depthStencilState.depthTestEnable = VK_TRUE;
     depthStencilState.depthWriteEnable = VK_TRUE;
     depthStencilState.depthCompareOp = VK_COMPARE_OP_LESS; // 深度值小的留下
-    depthStencilState.depthBoundsTestEnable =
-        VK_FALSE; // 指定深度范围，这里不启用
+    depthStencilState.depthBoundsTestEnable = VK_FALSE;    // 指定深度范围，这里不启用
     depthStencilState.stencilTestEnable = VK_FALSE;
 
     // 颜色混合
-    VkPipelineColorBlendStateCreateInfo colorBlendCreateInfo =
-        {}; // 全局的帧缓冲设置
-    VkPipelineColorBlendAttachmentState colorBlendAttachment =
-        {}; // 单独的帧缓冲设置
+    VkPipelineColorBlendStateCreateInfo colorBlendCreateInfo = {}; // 全局的帧缓冲设置
+    VkPipelineColorBlendAttachmentState colorBlendAttachment = {}; // 单独的帧缓冲设置
     colorBlendAttachment.colorWriteMask =
         VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
     // 下面的帧缓冲设置实现是通过alpha混合实现半透明效果
     colorBlendAttachment.blendEnable = VK_TRUE;
     colorBlendAttachment.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
-    colorBlendAttachment.dstColorBlendFactor =
-        VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+    colorBlendAttachment.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
     colorBlendAttachment.colorBlendOp = VK_BLEND_OP_ADD;
     colorBlendAttachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
     colorBlendAttachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
     colorBlendAttachment.alphaBlendOp = VK_BLEND_OP_ADD;
     // 全局帧缓冲设置
-    colorBlendCreateInfo.sType =
-        VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+    colorBlendCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
     colorBlendCreateInfo.logicOpEnable = VK_FALSE; // 会禁用所有混合设置
     colorBlendCreateInfo.logicOp = VK_LOGIC_OP_COPY;
     colorBlendCreateInfo.attachmentCount = 1;
-    colorBlendCreateInfo.pAttachments =
-        &colorBlendAttachment; // 添加单独帧缓冲设置
+    colorBlendCreateInfo.pAttachments = &colorBlendAttachment; // 添加单独帧缓冲设置
     colorBlendCreateInfo.blendConstants[0] = 0.0f;
     colorBlendCreateInfo.blendConstants[1] = 0.0f;
     colorBlendCreateInfo.blendConstants[2] = 0.0f;
@@ -615,8 +615,7 @@ void LearnVKApp::createGraphicsPipeline() {
     pipelineCreateInfo.renderPass = m_renderPass;
     pipelineCreateInfo.subpass = 0; // 子流程数组中的索引
 
-    pipelineCreateInfo.basePipelineHandle =
-        VK_NULL_HANDLE; // 通过已有管线创造新的管线
+    pipelineCreateInfo.basePipelineHandle = VK_NULL_HANDLE; // 通过已有管线创造新的管线
     pipelineCreateInfo.basePipelineIndex = -1;
 
     res = vkCreateGraphicsPipelines(m_device, VK_NULL_HANDLE, 1,
@@ -634,11 +633,11 @@ void LearnVKApp::createGraphicsPipeline() {
 void LearnVKApp::createFrameBuffers() {
     m_swapChainFrameBuffers.resize(m_swapChainImageViews.size());
     for (int i = 0; i < m_swapChainImages.size(); i++) {
-        VkImageView imageViews[] = {m_swapChainImageViews[i], m_depthImageView};
+        VkImageView imageViews[] = {m_colorImageView, m_depthImageView, m_swapChainImageViews[i]}; // 写进自己创建的framebuffer对象中，然后由swapchain的对象来resolve呈现
         VkFramebufferCreateInfo createInfo = {};
         createInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
         createInfo.renderPass = m_renderPass;
-        createInfo.attachmentCount = 2;
+        createInfo.attachmentCount = 3;
         createInfo.pAttachments = imageViews;
         createInfo.width = m_swapChainImageExtent.width;
         createInfo.height = m_swapChainImageExtent.height;
@@ -667,11 +666,22 @@ void LearnVKApp::createCommandPool() {
 void LearnVKApp::createDepthResources() {
     VkFormat depthFormat = findDepthFormat();
     createImage(
-        m_swapChainImageExtent.width, m_swapChainImageExtent.height, 1, depthFormat,
-        VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
+        m_swapChainImageExtent.width, m_swapChainImageExtent.height, 1,
+        m_msaaSampleCount, depthFormat, VK_IMAGE_TILING_OPTIMAL,
+        VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, m_depthImage, m_depthImageMemory);
-    m_depthImageView =
-        createImageView(m_depthImage, depthFormat, VK_IMAGE_ASPECT_DEPTH_BIT, 1);
+    m_depthImageView = createImageView(m_depthImage, depthFormat, VK_IMAGE_ASPECT_DEPTH_BIT, 1);
+    transitionImageLayout(m_depthImage, depthFormat, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, 1); // 优化
+}
+
+void LearnVKApp::createColorResources() {
+    VkFormat colorFormat = m_swapChainImageFormat;
+    createImage(m_swapChainImageExtent.width, m_swapChainImageExtent.height, 1,
+                m_msaaSampleCount, colorFormat, VK_IMAGE_TILING_OPTIMAL,
+                VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT,
+                VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, m_colorImage, m_colorImageMemory);
+    m_colorImageView = createImageView(m_colorImage, colorFormat, VK_IMAGE_ASPECT_COLOR_BIT, 1);
+    transitionImageLayout(m_colorImage, colorFormat, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, 1); // 优化
 }
 
 VkFormat LearnVKApp::findDepthFormat() {
@@ -720,7 +730,7 @@ void LearnVKApp::createTextureImage(const std::string& textureName) {
     stbi_image_free(pixels);
 
     createImage(static_cast<uint32_t>(texWidth), static_cast<uint32_t>(texHeight), m_mipLevels,
-                VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_TILING_OPTIMAL,
+                VK_SAMPLE_COUNT_1_BIT, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_TILING_OPTIMAL,
                 VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
                 VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, m_textureImage,
                 m_textureImageMemory);
@@ -741,7 +751,7 @@ void LearnVKApp::createTextureImage(const std::string& textureName) {
     vkFreeMemory(m_device, stagingBufferMemory, nullptr);
 }
 
-void LearnVKApp::createImage(uint32_t width, uint32_t height, uint32_t mipLevels, VkFormat format,
+void LearnVKApp::createImage(uint32_t width, uint32_t height, uint32_t mipLevels, VkSampleCountFlagBits numSamples, VkFormat format,
                              VkImageTiling tiling, VkImageUsageFlags usage,
                              VkMemoryPropertyFlags properties, VkImage& image,
                              VkDeviceMemory& memory) {
@@ -757,7 +767,7 @@ void LearnVKApp::createImage(uint32_t width, uint32_t height, uint32_t mipLevels
     imageInfo.tiling = tiling;
     imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
     imageInfo.usage = usage;
-    imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+    imageInfo.samples = numSamples;
     imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
     VkResult res = vkCreateImage(m_device, &imageInfo, nullptr, &image);
     if (res != VK_SUCCESS) {
@@ -871,7 +881,6 @@ void LearnVKApp::transitionImageLayout(VkImage image, VkFormat format,
         VK_QUEUE_FAMILY_IGNORED; // 如果不需要转换队列族一定要设置ignore
     imageBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     imageBarrier.image = image;
-    imageBarrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
     imageBarrier.subresourceRange.baseArrayLayer = 0;
     imageBarrier.subresourceRange.layerCount = 1;
     imageBarrier.subresourceRange.baseMipLevel = 0;
@@ -879,6 +888,15 @@ void LearnVKApp::transitionImageLayout(VkImage image, VkFormat format,
 
     VkPipelineStageFlags sourceStage;      // 生产者阶段，在屏障前
     VkPipelineStageFlags destinationStage; // 消费者阶段，在屏障后
+
+    if (newLayout == VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL) {
+        imageBarrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+        if (hasStencilComponent(format)) {
+            imageBarrier.subresourceRange.aspectMask |= VK_IMAGE_ASPECT_STENCIL_BIT;
+        }
+    } else {
+        imageBarrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    }
 
     if (oldLayout == VK_IMAGE_LAYOUT_UNDEFINED && newLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL) { // 新创建的图片转为传输layout
         imageBarrier.srcAccessMask = 0;
@@ -890,9 +908,18 @@ void LearnVKApp::transitionImageLayout(VkImage image, VkFormat format,
     } else if (oldLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL && newLayout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) {
         imageBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
         imageBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-
         sourceStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
         destinationStage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+    } else if (oldLayout == VK_IMAGE_LAYOUT_UNDEFINED && newLayout == VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL) {
+        imageBarrier.srcAccessMask = 0;
+        imageBarrier.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+        sourceStage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+        destinationStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    } else if (oldLayout == VK_IMAGE_LAYOUT_UNDEFINED && newLayout == VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL) {
+        imageBarrier.srcAccessMask = 0;
+        imageBarrier.dstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+        sourceStage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+        destinationStage = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
     } else {
         throw std::invalid_argument("unsupported layout transition!");
     }
@@ -1302,6 +1329,7 @@ void LearnVKApp::pickPhysicalDevice() {
     for (auto& device : physicalDevices) {
         if (isDeviceSuitable(device)) {
             m_physicalDevice = device;
+            m_msaaSampleCount = getMaxUsableSampleCount();
             break;
         }
     }
@@ -1345,6 +1373,7 @@ void LearnVKApp::createLogicalDevice() {
     // 填写物理设备features
     VkPhysicalDeviceFeatures features = {};
     features.samplerAnisotropy = VK_TRUE; // 此处我们需要启用各项异性
+    features.sampleRateShading = VK_TRUE; // 开启多重采样着色
 
     VkDeviceCreateInfo deviceCreateInfo = {};
     deviceCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
@@ -1521,6 +1550,10 @@ void LearnVKApp::cleanupSwapChain() {
     vkDestroyImage(m_device, m_depthImage, nullptr);
     vkFreeMemory(m_device, m_depthImageMemory, nullptr);
 
+    vkDestroyImageView(m_device, m_colorImageView, nullptr);
+    vkDestroyImage(m_device, m_colorImage, nullptr);
+    vkFreeMemory(m_device, m_colorImageMemory, nullptr);
+
     for (auto& frameBuffer : m_swapChainFrameBuffers) {
         vkDestroyFramebuffer(m_device, frameBuffer, nullptr);
     }
@@ -1551,6 +1584,7 @@ void LearnVKApp::recreateSwapChain() {
     createImageViews();
     createRenderPass();
     createGraphicsPipeline();
+    createColorResources();
     createDepthResources();
     createFrameBuffers();
     createCommandBuffers();
@@ -1639,6 +1673,21 @@ void LearnVKApp::createBuffer(VkDeviceSize size, VkBufferUsageFlags usage,
         throw std::runtime_error("failed to allocate buffer memory!");
     }
     vkBindBufferMemory(m_device, buffer, memory, 0);
+}
+
+VkSampleCountFlagBits LearnVKApp::getMaxUsableSampleCount() {
+    VkPhysicalDeviceProperties physicalDeviceProperties;
+    vkGetPhysicalDeviceProperties(m_physicalDevice, &physicalDeviceProperties);
+
+    VkSampleCountFlags counts = physicalDeviceProperties.limits.framebufferColorSampleCounts & physicalDeviceProperties.limits.framebufferDepthSampleCounts;
+    if (counts & VK_SAMPLE_COUNT_64_BIT) { return VK_SAMPLE_COUNT_64_BIT; }
+    if (counts & VK_SAMPLE_COUNT_32_BIT) { return VK_SAMPLE_COUNT_32_BIT; }
+    if (counts & VK_SAMPLE_COUNT_16_BIT) { return VK_SAMPLE_COUNT_16_BIT; }
+    if (counts & VK_SAMPLE_COUNT_8_BIT) { return VK_SAMPLE_COUNT_8_BIT; }
+    if (counts & VK_SAMPLE_COUNT_4_BIT) { return VK_SAMPLE_COUNT_4_BIT; }
+    if (counts & VK_SAMPLE_COUNT_2_BIT) { return VK_SAMPLE_COUNT_2_BIT; }
+
+    return VK_SAMPLE_COUNT_1_BIT;
 }
 
 // 选择一个最好的格式，如果有SRGB就选SRGB
