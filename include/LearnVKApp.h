@@ -3,13 +3,15 @@
 
 #ifndef LEARN_VK_APP
 #define LEARN_VK_APP
-#include "vulkan/vulkan_core.h"
 #define GLFW_INCLUDE_VULKAN
 #define GLM_FORCE_RADIANS
 #define GLM_FORCE_DEPTH_ZERO_TO_ONE
 #define STB_IMAGE_IMPLEMENTATION
+#define TINYOBJLOADER_IMPLEMENTATION
 //#define PRINT_EXTENTION_INFO
 
+#include "tiny_obj_loader.h"
+#include "vulkan/vulkan_core.h"
 #include <GLFW/glfw3.h>
 #include <algorithm>
 #include <array>
@@ -17,12 +19,15 @@
 #include <filesystem>
 #include <fstream>
 #include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtx/hash.hpp>
 #include <glm/mat4x4.hpp>
 #include <glm/vec4.hpp>
 #include <iostream>
 #include <map>
 #include <set>
 #include <stdexcept>
+#include <string>
+#include <unordered_map>
 #include <vector>
 #include <vendor/stb_image.h>
 #include <vulkan/vulkan.h>
@@ -41,6 +46,7 @@ const static std::string RESOURCE_PATH = std::filesystem::current_path()
                                              .generic_string()
                                          + "/resource/";
 const static std::string TEXTURE_PATH = RESOURCE_PATH + "textures/";
+const static std::string MODEL_PATH = RESOURCE_PATH + "models/";
 
 struct Vertex {
     glm::vec3 position;
@@ -71,19 +77,19 @@ struct Vertex {
         attributeDescription[2].format = VK_FORMAT_R32G32B32A32_SFLOAT;
         return attributeDescription;
     }
+    bool operator==(const Vertex& other) const {
+        return position == other.position && color == other.color && texCoord == other.texCoord;
+    }
 };
 
-const std::vector<Vertex> g_vertices = {
-    {{-0.5f, -0.5f, 0.5f}, {1.0f, 0.0f, 0.0f}, {1.0f, 0.0f}},
-    {{0.5f, -0.5f, 0.5f}, {0.0f, 1.0f, 0.0f}, {0.0f, 0.0f}},
-    {{0.5f, 0.5f, 0.5f}, {0.0f, 0.0f, 1.0f}, {0.0f, 1.0f}},
-    {{-0.5f, 0.5f, 0.5f}, {1.0f, 1.0f, 1.0f}, {1.0f, 1.0f}},
-    {{-0.5f, -0.5f, 0.0f}, {1.0f, 0.0f, 0.0f}, {1.0f, 0.0f}},
-    {{0.5f, -0.5f, 0.0f}, {0.0f, 1.0f, 0.0f}, {0.0f, 0.0f}},
-    {{0.5f, 0.5f, 0.0f}, {0.0f, 0.0f, 1.0f}, {0.0f, 1.0f}},
-    {{-0.5f, 0.5f, 0.0f}, {1.0f, 1.0f, 1.0f}, {1.0f, 1.0f}}};
-
-const std::vector<uint16_t> g_indices = {0, 1, 2, 2, 3, 0, 4, 5, 6, 6, 7, 4};
+namespace std {
+template <>
+struct hash<Vertex> {
+    size_t operator()(Vertex const& vertex) const {
+        return ((hash<glm::vec3>()(vertex.position) ^ (hash<glm::vec3>()(vertex.color) << 1)) >> 1) ^ (hash<glm::vec2>()(vertex.texCoord) << 1);
+    }
+};
+} // namespace std
 
 struct QueueFamiliyIndices {
     std::set<uint32_t> familiesIndexSet;
@@ -177,7 +183,7 @@ private:
 
     void createCommandPool();
 
-    void createTextureImage();
+    void createTextureImage(const std::string& textureName);
 
     void createImage(uint32_t width, uint32_t height, VkFormat format,
                      VkImageTiling tiling, VkImageUsageFlags usags,
@@ -194,7 +200,10 @@ private:
 
     void createTextureSampler();
 
-    VkImageView createImageView(VkImage image, VkFormat format, VkImageAspectFlags aspectMask);
+    VkImageView createImageView(VkImage image, VkFormat format,
+                                VkImageAspectFlags aspectMask);
+
+    void loadModel(const std::string& modelName);
 
     template <typename T>
     void createLocalBuffer(const std::vector<T>& data, VkBufferUsageFlags usage,
@@ -315,6 +324,9 @@ private:
     VkImage m_depthImage;
     VkImageView m_depthImageView;
     VkDeviceMemory m_depthImageMemory;
+
+    std::vector<Vertex> g_vertices;
+    std::vector<uint32_t> g_indices;
 
     std::vector<const char*> m_validationLayers{"VK_LAYER_KHRONOS_validation"};
     std::vector<const char*> m_deviceExtentions{VK_KHR_SWAPCHAIN_EXTENSION_NAME};

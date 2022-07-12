@@ -7,9 +7,6 @@ set(VCPKG_PATH $ENV{VCPKG_ROOT_PATH})
 set(VCPKG_ROOT ${VCPKG_PATH}/scripts/buildsystems/vcpkg.cmake CACHE PATH "")
 set(CMAKE_TOOLCHAIN_FILE ${VCPKG_ROOT})
 
-# compile_commands.json
-# set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
-
 # 项目设置
 project ("LearnVK")
 set(CMAKE_CXX_STANDARD 17)
@@ -25,6 +22,7 @@ set(VK_SDK_LIB ${VK_SDK_PATH}/Lib/vulkan-1.lib)
 # vcpkg安装的glm和glfw3引入包
 find_package(glm CONFIG REQUIRED)
 find_package(glfw3 CONFIG REQUIRED)
+find_package(tinyobjloader CONFIG REQUIRED)
 
 # 将源代码添加到此项目的可执行文件
 file(GLOB_RECURSE HEADER_FILES ${PROJECT_SOURCE_DIR} "include/*.h")
@@ -37,6 +35,8 @@ add_executable(LearnVK ${SOURCE_FILES})
 target_link_libraries(LearnVK PRIVATE glm::glm)
 target_link_libraries(LearnVK PRIVATE glfw)
 target_link_libraries(LearnVK PRIVATE ${VK_SDK_LIB})
+target_link_libraries(LearnVK PRIVATE tinyobjloader::tinyobjloader)
+
 
 # 添加包含目录
 target_include_directories(LearnVK PRIVATE ${PROJECT_SOURCE_DIR}/include)

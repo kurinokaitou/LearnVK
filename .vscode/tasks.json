@@ -10,7 +10,7 @@
 				"-B",
 				"build/debug",
 				"-G",
-				"Unix Makefiles",
+				"Ninja",
 				"-DCMAKE_EXPORT_COMPILE_COMMANDS=ON",
 				"-DCMAKE_BUILD_TYPE=Debug"
 			],
@@ -28,7 +28,7 @@
 				"-B",
 				"build/release",
 				"-G",
-				"Unix Makefiles",
+				"Ninja",
 				"-DCMAKE_EXPORT_COMPILE_COMMANDS=ON",
 				"-DCMAKE_BUILD_TYPE=Release"
 			],
@@ -72,7 +72,6 @@
 		},
 		{
 			"label": "run",
-			"group": "none",
 			"type": "shell",
 			"command": "./${workspaceFolderBasename}.exe",
 			"args": [],
