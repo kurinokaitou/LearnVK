@@ -43,7 +43,6 @@ const static std::string CURRENT_PATH =
     std::filesystem::current_path().generic_string();
 const static std::string RESOURCE_PATH = std::filesystem::current_path()
                                              .parent_path()
-                                             .parent_path()
                                              .generic_string()
                                          + "/resource/";
 const static std::string TEXTURE_PATH = RESOURCE_PATH + "textures/";
