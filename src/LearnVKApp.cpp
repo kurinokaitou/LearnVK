@@ -520,7 +520,7 @@ void LearnVKApp::createGraphicsPipeline() {
     rasterizationCreateInfo.depthClampEnable = VK_FALSE; //是否截断片元在远近平面上
     rasterizationCreateInfo.rasterizerDiscardEnable = VK_FALSE;
     rasterizationCreateInfo.lineWidth = 1.0f;
-    rasterizationCreateInfo.cullMode = VK_CULL_MODE_NONE;                // 剔除背面
+    rasterizationCreateInfo.cullMode = VK_CULL_MODE_BACK_BIT;            // 剔除背面
     rasterizationCreateInfo.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE; // 逆时针顶点序为正面
     rasterizationCreateInfo.depthBiasEnable = VK_FALSE;                  // 阴影贴图的 alias
     rasterizationCreateInfo.depthBiasConstantFactor = 0.0f;
@@ -1456,16 +1456,14 @@ void LearnVKApp::updateUniformBuffers(uint32_t imageIndex) {
                      currentTime - startTime)
                      .count();
     UniformBufferObject ubo = {};
-    ubo.model = glm::rotate(glm::mat4(1.0f), time * glm::radians(90.0f),
+    ubo.model = glm::rotate(glm::mat4(1.0f), 0.0f,        // time * glm::radians(90.0f),
                             glm::vec3(0.0f, 0.0f, 1.0f)); // 以Z轴为轴每秒旋转90°
     ubo.view = glm::lookAt(glm::vec3(2.0f, 2.0f, 2.0f), glm::vec3(0),
                            glm::vec3(0.0f, 0.0f, 1.0f)); // 从(2,2,2)看向(0,0,0)
-    ubo.proj =
-        glm::perspective(glm::radians(45.0f),
-                         m_swapChainImageExtent.width / static_cast<float>(m_swapChainImageExtent.height),
-                         0.1f, 10.0f); // 投影矩阵，fov:45 平截头体近0.1远10
-    ubo.proj[1][1] *=
-        -1; // 因为OpenGL与Vulkan的y轴正方向是反的，因此需要将y轴缩放系数取相反数
+    ubo.proj = glm::perspective(glm::radians(45.0f),
+                                m_swapChainImageExtent.width / static_cast<float>(m_swapChainImageExtent.height),
+                                0.1f, 10.0f); // 投影矩阵，fov:45 平截头体近0.1远10
+    ubo.proj[1][1] *= -1;                     // 因为OpenGL与Vulkan的y轴正方向是反的，因此需要将y轴缩放系数取相反数
 
     void* data;
     vkMapMemory(m_device, m_uboBufferMemories[imageIndex], 0, sizeof(ubo), 0,
