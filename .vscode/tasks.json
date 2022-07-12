@@ -56,6 +56,32 @@
 			]
 		},
 		{
+			"label": "debug",
+			"group": "build",
+			"type": "shell",
+			"command": "cmake",
+			"args": [
+				"--build",
+				"build/debug",
+				"-j6"
+			],
+			"options": {
+				"cwd": "${workspaceFolder}"
+			},
+			"detail": "debug build project",
+		},
+		{
+			"label": "run",
+			"group": "none",
+			"type": "shell",
+			"command": "./${workspaceFolderBasename}.exe",
+			"args": [],
+			"options": {
+				"cwd": "${workspaceFolder}/build/debug"
+			},
+			"detail": "run project",
+		},
+		{
 			"type": "cmake",
 			"label": "clean",
 			"command": "clean",
